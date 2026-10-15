@@ -20,6 +20,11 @@ fi
 cat >"$stage/test-hook.sh" <<'CONTAINER_TEST'
 #!/bin/sh
 set -eu
+mkdir -p /tmp/package-owner
+tar -xzf /package -C /tmp/package-owner
+for path in usr etc usr/share/rpcd/acl.d/verso-jodu5174x.json usr/bin/verso-plugin-jodu5174x; do
+  test "$(stat -c '%u:%g' "/tmp/package-owner/$path")" = 0:0
+done
 mkdir -p /etc/config /etc/init.d /tmp/stubs
 for service in rpcd verso-plugin-jodu5174x verso; do
   cat >"/etc/init.d/$service" <<'STUB'
@@ -72,6 +77,7 @@ check_seed_failure ln
 CONTAINER_TEST
 
 docker run --rm --pull=never --network none \
+  -v "$PWD/dist/verso-plugin-jodu5174x-linux-arm64.tar.gz:/package:ro" \
   -v "$stage/usr/share/verso/plugins/jodu5174x/default-config:/usr/share/verso/plugins/jodu5174x/default-config:ro" \
   -v "$stage/usr/libexec/verso-plugin-jodu5174x/post-install.sh:/hook:ro" \
   -v "$stage/test-hook.sh:/test-hook.sh:ro" \
