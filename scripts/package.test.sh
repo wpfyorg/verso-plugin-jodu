@@ -3,6 +3,10 @@ set -eu
 cd "$(dirname "$0")/.."
 
 ./scripts/package.sh
+if tar -tzf dist/verso-plugin-jodu5174x-linux-arm64.tar.gz | grep -E '(^|/)\._' >/dev/null; then
+  echo 'Router archive contains macOS metadata files.' >&2
+  exit 1
+fi
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT HUP INT TERM
 tar -xzf dist/verso-plugin-jodu5174x-linux-arm64.tar.gz -C "$stage"

@@ -12,6 +12,6 @@ install -m 0644 dist/verso-jodu5174x.acl.json "$stage/usr/share/rpcd/acl.d/verso
 install -m 0755 rootfs/etc/init.d/verso-plugin-jodu5174x "$stage/etc/init.d/verso-plugin-jodu5174x"
 install -m 0755 packaging/apk/post-install.sh "$stage/usr/libexec/verso-plugin-jodu5174x/post-install.sh"
 case "$(tar --version 2>/dev/null)" in
-  *bsdtar*) tar --uid 0 --gid 0 --uname root --gname root -czf dist/verso-plugin-jodu5174x-linux-arm64.tar.gz -C "$stage" etc usr ;;
+  *bsdtar*) COPYFILE_DISABLE=1 tar --uid 0 --gid 0 --uname root --gname root -czf dist/verso-plugin-jodu5174x-linux-arm64.tar.gz -C "$stage" etc usr ;;
   *) tar --owner=0 --group=0 --numeric-owner -czf dist/verso-plugin-jodu5174x-linux-arm64.tar.gz -C "$stage" etc usr ;;
 esac
