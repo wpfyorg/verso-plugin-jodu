@@ -4,6 +4,10 @@ A standalone [Verso](https://github.com/we-are-mono/verso) status dashboard for 
 
 The plugin displays connection state, primary and secondary 5G carrier details, RSRP, RSRQ, SINR, BLER, ODU traffic counters and Ethernet link status. It also provides a Verso settings form for the ODU address, username, password and monitoring switch. Settings are staged for Verso's normal review and Apply flow. The status reader runs every 15 seconds and hides stale results when an ODU read fails.
 
+With the companion Verso `feat/plugin-overview-cards` change, the homepage also shows a **5G ODU** card with connection, radio, band, RSRP, SINR, Ethernet and last-check readings. Its link opens the full dashboard. It uses the same scoped configuration read as the dashboard and shows an unavailable message when permission, configuration or fresh telemetry is missing. Reload the homepage to refresh the card; it does not stream updates.
+
+The homepage card requires both the companion Verso core change (based on v0.6.0) and this adapter build. Stock Verso v0.6.0 has no plugin homepage-card contract; installing this adapter alone keeps the existing status/settings pages but does not add a homepage card. The published v0.1.1 feed release does not include this change.
+
 ## Requirements
 
 - Verso with manifest v1 plugin support (developed against Verso 0.5.x).
@@ -73,6 +77,7 @@ The underlying JODU package and `/etc/config/jodu5174x` remain installed.
 - Read permission for JODU UCI configuration is required before rendering live status. Passwords are never rendered. Settings write access is handled by Verso's rpcd ACL checks.
 - Rebooting the ODU is not implemented. Current Verso plugin commands do not expose an authorized ODU reboot action.
 - Dashboard refresh uses normal page reloads. Live polling happens server-side every 15 seconds; there is no push UI.
+- The optional `overview` manifest contribution requests `GET /overview`. It returns only a read-only summary; the companion shell supplies the card frame, link and saved layout controls. No write or command is available through this endpoint.
 - Tested with synthetic responses and a Linux ARM64 cross-build. The signed APK and trusted APK v3 index were verified in CI. **Installation on the target router, live JODU hardware, access control and Verso UI appearance remain unverified.**
 
 ## Development

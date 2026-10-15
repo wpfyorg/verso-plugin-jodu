@@ -190,6 +190,24 @@ func (m *monitor) status() map[string]any {
 	return out
 }
 
+// overview shares the monitor's cached reading with the homepage. The shell
+// owns the card and its link; this endpoint supplies only read-only widgets.
+func (m *monitor) overview() map[string]any {
+	v, updated, reason := m.current()
+	if reason != "" {
+		return envelope("5G ODU", warn("ODU status", reason))
+	}
+	items := section(v.Net, "Connection", "sim_card_state", "Radio", "operation_mode",
+		"Band", "band", "RSRP (dBm)", "rsrp", "SINR (dB)", "sinr")
+	if link := strings.TrimSpace(v.Link); link != "" {
+		items = append(items, prop("Ethernet", link))
+	}
+	if !updated.IsZero() {
+		items = append(items, prop("Checked", updated.Format("15:04:05")))
+	}
+	return envelope("5G ODU", map[string]any{"type": "properties", "items": items})
+}
+
 func snapshot(r *http.Request) (map[string]string, bool) {
 	payload, err := base64.StdEncoding.DecodeString(r.Header.Get("X-Verso-UCI"))
 	if err != nil || len(payload) == 0 || len(payload) > 65536 {
@@ -256,7 +274,7 @@ func (m *monitor) handler(w http.ResponseWriter, r *http.Request) {
 	}
 	var output map[string]any
 	switch r.URL.Path {
-	case "/", "":
+	case "/", "", "/overview":
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -264,10 +282,14 @@ func (m *monitor) handler(w http.ResponseWriter, r *http.Request) {
 		// Verso can render plugin GETs without authentication. Only expose
 		// ODU telemetry after its scoped UCI read has succeeded.
 		if _, allowed := snapshot(r); !allowed {
-			output = envelope("5G ODU", warn("Status unavailable", "Sign in to Verso with permission to read JODU settings."))
+			output = envelope("5G ODU", warn("Status unavailable", "Verso could not read JODU settings. Install the JODU LuCI package and sign in with permission to read it."))
 			break
 		}
-		output = m.status()
+		if r.URL.Path == "/overview" {
+			output = m.overview()
+		} else {
+			output = m.status()
+		}
 	case "/settings":
 		values, ok := snapshot(r)
 		if r.Method == http.MethodGet {
