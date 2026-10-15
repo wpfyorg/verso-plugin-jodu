@@ -1,0 +1,16 @@
+name: Build and test
+on:
+  push:
+  pull_request:
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - run: go vet ./...
+      - run: ./scripts/package.sh
+      - run: tar -tzf dist/verso-plugin-jodu5174x-linux-arm64.tar.gz
