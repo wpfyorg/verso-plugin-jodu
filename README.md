@@ -27,7 +27,7 @@ This produces `dist/verso-plugin-jodu5174x-linux-arm64.tar.gz`, containing the s
 
 First install and configure the original JODU LuCI package from its project or release page. This independently licensed, proprietary package must provide `/usr/libexec/jodu5174x-data.sh` and `/etc/config/jodu5174x`; its `main` section must contain the ODU address and credentials. The adapter does not include or modify that package.
 
-The signed [v0.1.0 release](https://github.com/wpfyorg/verso-plugin-jodu5174x/releases/tag/v0.1.0) is available from the APK feed. Set up the feed once. Its public key and index are:
+The signed [v0.1.1 release](https://github.com/wpfyorg/verso-plugin-jodu5174x/releases/tag/v0.1.1) is available from the APK feed. Set up the feed once. Its public key and index are:
 
 - Public signing key: <https://wpfyorg.github.io/verso-plugin-jodu5174x/verso-plugin-jodu5174x.pem>
 - APK repository: <https://wpfyorg.github.io/verso-plugin-jodu5174x/aarch64_generic/packages.adb>
@@ -83,6 +83,6 @@ go vet ./...
 ./scripts/package.sh
 ```
 
-The feed uses an ECDSA P-256 signing key. Its private PEM stays outside the repository and is stored in the GitHub Actions secret `APK_SIGNING_KEY`; the corresponding public PEM is tracked as `verso-plugin-jodu5174x.pem`. The [v0.1.0 release](https://github.com/wpfyorg/verso-plugin-jodu5174x/releases/tag/v0.1.0) publishes package `0.1.0-r0`. Each higher version tag builds and signs a new package and deploys the feed through GitHub Pages. Existing tags and releases are never replaced.
+The feed uses an ECDSA P-256 signing key. Its private PEM stays outside the repository and is stored in the GitHub Actions secret `APK_SIGNING_KEY`; the corresponding public PEM is tracked as `verso-plugin-jodu5174x.pem`. The [v0.1.1 release](https://github.com/wpfyorg/verso-plugin-jodu5174x/releases/tag/v0.1.1) publishes package `0.1.1-r0`. Each higher version tag builds and signs a new package and deploys the feed through GitHub Pages. Existing tags and releases are never replaced.
 
 Project is MIT licensed; the upstream JODU package retains its separate license.

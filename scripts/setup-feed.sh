@@ -10,7 +10,8 @@ tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT HUP INT TERM
 uclient-fetch -q -O "$tmp" "$url/verso-plugin-jodu5174x.pem"
 test -s "$tmp"
-install -m 0644 "$tmp" "$key"
+cp "$tmp" "$key"
+chmod 0644 "$key"
 printf '%s\n' "$url/aarch64_generic/packages.adb" > "$list"
 grep -qxF aarch64_generic /etc/apk/arch || printf '%s\n' aarch64_generic >> /etc/apk/arch
 
