@@ -90,6 +90,32 @@ func TestMonitoringToggleOnlyStagesEnabled(t *testing.T) {
 	if code != http.StatusBadRequest {
 		t.Fatal(code)
 	}
+	code, out = request(t, m, "POST", "/", "_action=monitor&enabled=0", configHeader(t))
+	if code != http.StatusOK || out["commit"] == nil {
+		t.Fatal("same-page monitor form did not stage")
+	}
+}
+
+func TestEmptyUCIPasswordIsValidDisabledConfiguration(t *testing.T) {
+	command := filepath.Join(t.TempDir(), "uci")
+	script := `#!/bin/sh
+for last do :; done
+case "$last" in
+jodu5174x.main) echo jodu5174x;;
+jodu5174x.main.host) echo 192.168.225.1;;
+jodu5174x.main.username) echo Admin;;
+jodu5174x.main.enabled) echo 0;;
+jodu5174x.main.password) exit 1;;
+*) exit 1;;
+esac
+`
+	if err := os.WriteFile(command, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadODUConfig(context.Background(), command, t.TempDir(), t.TempDir())
+	if err != nil || cfg.Enabled || cfg.Password != "" {
+		t.Fatal("empty UCI option rejected disabled config")
+	}
 }
 
 func TestRebootRequiresConfirmedSingleUseRequest(t *testing.T) {

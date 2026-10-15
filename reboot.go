@@ -124,7 +124,7 @@ func rebootPage(token string) map[string]any {
 		warn("Reboot the outdoor unit", "Internet access through the ODU will pause. This restarts the outdoor unit, not this router."),
 	}
 	if token != "" {
-		children = append(children, map[string]any{"type": "form", "action": "/plugins/jodu5174x/reboot", "submit": "Reboot ODU", "fields": []any{
+		children = append(children, map[string]any{"type": "form", "submit": "Reboot ODU", "fields": []any{
 			map[string]any{"type": "field", "kind": "hidden", "name": "token", "value": token},
 			map[string]any{"type": "switch", "name": "confirm", "label": "I understand Internet access will pause", "on": false},
 		}})

@@ -188,7 +188,8 @@ func (m *monitor) status(current map[string]string) map[string]any {
 			children = append(children, box("ODU traffic counters", usage))
 		}
 	}
-	children = append(children, map[string]any{"type": "form", "action": "/plugins/jodu5174x/monitor", "submit": "Stage monitoring", "fields": []any{
+	children = append(children, map[string]any{"type": "form", "submit": "Stage monitoring", "fields": []any{
+		map[string]any{"type": "field", "kind": "hidden", "name": "_action", "value": "monitor"},
 		map[string]any{"type": "switch", "name": "enabled", "label": "Monitor the ODU", "on": current["enabled"] == "1"},
 	}})
 	children = append(children, map[string]any{"type": "link", "label": "Settings", "href": "/plugins/jodu5174x/settings", "icon": "settings", "style": "button"})
@@ -291,6 +292,16 @@ func (m *monitor) handler(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/", "", "/overview":
 		if r.Method != http.MethodGet {
+			if r.Method == http.MethodPost && r.URL.Path != "/overview" {
+				if r.ParseForm() != nil || r.PostForm.Get("_action") != "monitor" {
+					http.Error(w, "Unknown action", http.StatusBadRequest)
+					return
+				}
+				// Forms post their current page; the shell owns form destinations.
+				r.URL.Path = "/monitor"
+				m.handler(w, r)
+				return
+			}
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}

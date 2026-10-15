@@ -34,6 +34,12 @@ func loadODUConfig(ctx context.Context, command, configDir, saveDir string) (odu
 	for _, key := range []string{"host", "username", "password", "enabled"} {
 		value, err := get("." + key)
 		if err != nil {
+			// UCI's CLI returns exit 1 for an empty/unset string option.
+			// Empty passwords are valid configuration until the operator sets one.
+			if key == "password" && ctx.Err() == nil {
+				values[key] = ""
+				continue
+			}
 			return oduConfig{}, errConfigUnavailable
 		}
 		values[key] = value
