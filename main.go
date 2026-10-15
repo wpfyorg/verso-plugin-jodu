@@ -1,5 +1,4 @@
-// A native, local-only Verso view for the separately installed JODU5174x package.
-// No code or assets from that package are included here.
+// Native Verso configuration and monitoring for JODU5174x outdoor units.
 package main
 
 import (
@@ -13,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/user"
 	"regexp"
 	"strconv"
@@ -22,69 +20,72 @@ import (
 	"time"
 )
 
-const dataCommand = "/usr/libexec/jodu5174x-data.sh"
 const defaultSocket = "/var/run/verso-plugin-jodu5174x/jodu5174x.sock"
 
 type reading struct {
-	Net   map[string]any `json:"netstatus"`
-	Data  map[string]any `json:"datastatus"`
-	Link  string         `json:"eth_link"`
-	Error string         `json:"error"`
+	Net  map[string]any `json:"netstatus"`
+	Data map[string]any `json:"datastatus"`
+	Link string         `json:"eth_link"`
 }
 
 type monitor struct {
-	mu      sync.RWMutex
-	value   reading
-	updated time.Time
-	checked time.Time
-	err     string
-	command string
+	mu                         sync.RWMutex
+	value                      reading
+	updated                    time.Time
+	checked                    time.Time
+	err                        string
+	fetch                      func(context.Context) (reading, error)
+	reboot                     func(context.Context, string) error
+	confirmations              map[string]rebootConfirmation
+	generation                 uint64
+	rebooting                  bool
+	rebootMessage, rebootLevel string
 }
 
 func (m *monitor) poll() {
 	ctx, cancel := context.WithTimeout(context.Background(), 38*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, m.command).Output()
+	m.mu.RLock()
+	generation := m.generation
+	rebooting := m.rebooting
+	m.mu.RUnlock()
+	if rebooting {
+		return
+	}
 	var result reading
-	if err == nil {
-		if len(output) > 65536 {
-			err = errors.New("oversized response")
-		} else {
-			err = json.Unmarshal(output, &result)
-		}
+	err := errConfigUnavailable
+	if m.fetch != nil {
+		result, err = m.fetch(ctx)
 	}
 	reason := ""
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			reason = "Install the JODU LuCI package to enable monitoring."
-		} else {
-			reason = "Unable to read ODU status."
-		}
-	} else if result.Error != "" {
-		switch result.Error {
-		case "disabled":
+		switch {
+		case errors.Is(err, errConfigUnavailable):
+			reason = "Configure the ODU in Settings."
+		case errors.Is(err, errMonitoringDisabled):
 			reason = "Monitoring is disabled."
-		case "password not configured":
+		case errors.Is(err, errPasswordMissing):
 			reason = "Set the ODU password in Settings."
-		case "login failed":
+		case errors.Is(err, errODULogin):
 			reason = "ODU sign-in failed. Check Settings."
-		case "curl not found":
-			reason = "Install curl on the router."
 		default:
-			reason = "Unable to reach the ODU. Check its address and connection."
+			reason = "Unable to read ODU status. Check its address and connection."
 		}
 	} else if len(result.Net) == 0 {
 		reason = "No ODU status received."
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if generation != m.generation {
+		return
+	}
 	m.checked = time.Now()
 	m.err = reason
 	if reason == "" {
 		m.value = result
 		m.updated = m.checked
 	} else {
-		m.value = reading{} // Never pass old signal levels off as current data.
+		m.value = reading{Link: result.Link} // Never pass old signal levels off as current data.
 	}
 }
 
@@ -94,7 +95,7 @@ func (m *monitor) current() (reading, time.Time, string) {
 	if m.checked.IsZero() {
 		return reading{}, time.Time{}, "Checking ODU…"
 	}
-	if !m.updated.IsZero() && time.Since(m.updated) > 60*time.Second {
+	if m.err == "" && !m.updated.IsZero() && time.Since(m.updated) > 60*time.Second {
 		return reading{}, time.Time{}, "ODU reading is stale."
 	}
 	return m.value, m.updated, m.err
@@ -155,15 +156,18 @@ func envelope(title string, widget any) map[string]any {
 func warn(title, body string) any {
 	return map[string]any{"type": "callout", "variant": "warning", "title": title, "body": body}
 }
-func (m *monitor) status() map[string]any {
+func (m *monitor) status(current map[string]string) map[string]any {
 	v, updated, reason := m.current()
 	children := []any{}
 	if reason != "" {
 		children = append(children, warn("ODU status", reason))
+		if v.Link != "" {
+			children = append(children, box("Ethernet", []any{prop("Link", v.Link)}))
+		}
 	}
 	if reason == "" {
 		summary := section(v.Net, "Connection", "sim_card_state", "Radio", "operation_mode",
-			"RRC", "rrc_state", "Connected for", "connection_time", "Ethernet", "__unused")
+			"RRC", "rrc_state", "Connected for", "connection_time", "ODU firmware", "softversion")
 		if v.Link != "" {
 			summary = append(summary, prop("Ethernet", strings.TrimSpace(v.Link)))
 		}
@@ -184,7 +188,11 @@ func (m *monitor) status() map[string]any {
 			children = append(children, box("ODU traffic counters", usage))
 		}
 	}
+	children = append(children, map[string]any{"type": "form", "action": "/plugins/jodu5174x/monitor", "submit": "Stage monitoring", "fields": []any{
+		map[string]any{"type": "switch", "name": "enabled", "label": "Monitor the ODU", "on": current["enabled"] == "1"},
+	}})
 	children = append(children, map[string]any{"type": "link", "label": "Settings", "href": "/plugins/jodu5174x/settings", "icon": "settings", "style": "button"})
+	children = append(children, map[string]any{"type": "link", "label": "Reboot ODU", "href": "/plugins/jodu5174x/reboot", "icon": "refresh-cw"})
 	out := envelope("5G ODU", map[string]any{"type": "stack", "children": children})
 	out["act"] = map[string]any{"label": "Refresh", "href": "/plugins/jodu5174x/", "icon": "refresh-cw"}
 	return out
@@ -195,7 +203,11 @@ func (m *monitor) status() map[string]any {
 func (m *monitor) overview() map[string]any {
 	v, updated, reason := m.current()
 	if reason != "" {
-		return envelope("5G ODU", warn("ODU status", reason))
+		children := []any{warn("ODU status", reason)}
+		if v.Link != "" {
+			children = append(children, map[string]any{"type": "properties", "items": []any{prop("Ethernet", v.Link)}})
+		}
+		return envelope("5G ODU", map[string]any{"type": "stack", "children": children})
 	}
 	items := section(v.Net, "Connection", "sim_card_state", "Radio", "operation_mode",
 		"Band", "band", "RSRP (dBm)", "rsrp", "SINR (dB)", "sinr")
@@ -238,7 +250,7 @@ func fields(current map[string]string) []any {
 func settings(current map[string]string, ok bool, reason string) map[string]any {
 	var children []any
 	if !ok {
-		children = append(children, warn("Settings unavailable", "Verso could not read jodu5174x configuration. Install the LuCI package and sign in with an account allowed to read it."))
+		children = append(children, warn("Settings unavailable", "Verso could not read the ODU configuration. Confirm this plugin is installed completely and your account has permission to read its settings."))
 	} else {
 		children = append(children, map[string]any{"type": "form", "style": "page", "submit": "Stage settings", "fields": fields(current)})
 	}
@@ -268,6 +280,9 @@ func validHost(value string) bool {
 }
 func (m *monitor) handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodPost {
+		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -281,14 +296,45 @@ func (m *monitor) handler(w http.ResponseWriter, r *http.Request) {
 		}
 		// Verso can render plugin GETs without authentication. Only expose
 		// ODU telemetry after its scoped UCI read has succeeded.
-		if _, allowed := snapshot(r); !allowed {
-			output = envelope("5G ODU", warn("Status unavailable", "Verso could not read JODU settings. Install the JODU LuCI package and sign in with permission to read it."))
+		current, allowed := snapshot(r)
+		if !allowed {
+			output = envelope("5G ODU", warn("Status unavailable", "Sign in to Verso with permission to read the ODU settings."))
 			break
 		}
 		if r.URL.Path == "/overview" {
 			output = m.overview()
 		} else {
-			output = m.status()
+			output = m.status(current)
+		}
+	case "/monitor":
+		current, allowed := snapshot(r)
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !allowed {
+			http.Error(w, "Configuration read required", http.StatusForbidden)
+			return
+		}
+		if r.ParseForm() != nil || (r.PostForm.Get("enabled") != "0" && r.PostForm.Get("enabled") != "1") {
+			http.Error(w, "Invalid monitoring setting", http.StatusBadRequest)
+			return
+		}
+		output = m.status(current)
+		if next := r.PostForm.Get("enabled"); next != current["enabled"] {
+			output["commit"] = []any{map[string]any{"config": "jodu5174x", "section": "main", "values": map[string]string{"enabled": next}}}
+			output["notice"] = map[string]any{"level": "info", "text": "Monitoring change staged. Apply it from Verso's top bar."}
+		}
+	case "/reboot":
+		current, allowed := snapshot(r)
+		if !allowed {
+			http.Error(w, "Configuration read required", http.StatusForbidden)
+			return
+		}
+		var status int
+		output, status = m.rebootRequest(r, current)
+		if status != http.StatusOK {
+			w.WriteHeader(status)
 		}
 	case "/settings":
 		values, ok := snapshot(r)
@@ -338,9 +384,7 @@ func (m *monitor) handler(w http.ResponseWriter, r *http.Request) {
 }
 func main() {
 	socket := flag.String("socket", defaultSocket, "Unix socket path")
-	command := flag.String("command", dataCommand, "local installed read-only data command")
 	flag.Parse()
-	m := &monitor{command: *command}
 	parent := strings.TrimSuffix(*socket, "/"+lastSegment(*socket))
 	if err := os.MkdirAll(parent, 0750); err != nil {
 		log.Fatal(err)
@@ -356,6 +400,29 @@ func main() {
 	}
 	if err := os.Chmod(parent, 0750); err != nil {
 		log.Fatal(err)
+	}
+	configDir := parent + "/uci"
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		log.Fatal(err)
+	}
+	client := newODUClient()
+	m := &monitor{
+		fetch: func(ctx context.Context) (reading, error) {
+			cfg, err := loadODUConfig(ctx, "/sbin/uci", "/etc/config", configDir)
+			if err != nil {
+				return reading{}, err
+			}
+			value, err := client.Read(ctx, cfg)
+			value.Link = ethernetLink(ctx, cfg.Host)
+			return value, err
+		},
+		reboot: func(ctx context.Context, host string) error {
+			cfg, err := loadODUConfig(ctx, "/sbin/uci", "/etc/config", configDir)
+			if err != nil || cfg.Host != host {
+				return errConfigUnavailable
+			}
+			return client.Reboot(ctx, cfg)
+		},
 	}
 	if err := os.Remove(*socket); err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Fatal(err)

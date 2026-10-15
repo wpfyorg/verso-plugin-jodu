@@ -17,10 +17,13 @@ test -x dist/verso-plugin-jodu5174x
 
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT HUP INT TERM
-install -d "$stage/usr/bin" "$stage/usr/share/verso/plugins/jodu5174x" "$stage/etc/init.d"
+install -d "$stage/usr/bin" "$stage/usr/share/verso/plugins/jodu5174x" "$stage/usr/share/rpcd/acl.d" "$stage/usr/libexec/verso-plugin-jodu5174x" "$stage/etc/init.d"
 install -m 0755 dist/verso-plugin-jodu5174x "$stage/usr/bin/verso-plugin-jodu5174x"
 install -m 0644 manifest.json "$stage/usr/share/verso/plugins/jodu5174x/manifest.json"
+install -m 0644 dist/jodu5174x.default-config "$stage/usr/share/verso/plugins/jodu5174x/default-config"
+install -m 0644 dist/verso-jodu5174x.acl.json "$stage/usr/share/rpcd/acl.d/verso-jodu5174x.json"
 install -m 0755 rootfs/etc/init.d/verso-plugin-jodu5174x "$stage/etc/init.d/verso-plugin-jodu5174x"
+install -m 0755 packaging/apk/post-install.sh "$stage/usr/libexec/verso-plugin-jodu5174x/post-install.sh"
 
 repo=site/aarch64_generic
 mkdir -p "$repo"
@@ -32,7 +35,7 @@ apk mkpkg \
   --info license:MIT \
   --info url:https://github.com/wpfyorg/verso-plugin-jodu5174x \
   --info origin:verso-plugin-jodu5174x \
-  --info 'depends:verso curl' \
+  --info 'depends:verso' \
   --files "$stage" \
   --script post-install:packaging/apk/post-install.sh \
   --script post-upgrade:packaging/apk/post-install.sh \

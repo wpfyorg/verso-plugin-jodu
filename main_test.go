@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -107,7 +108,7 @@ func TestSettingsRejectsHostInjection(t *testing.T) {
 
 func TestPollClearsOldReadingsOnFailure(t *testing.T) {
 	m := &monitor{value: reading{Net: map[string]any{"rsrp": "-60"}},
-		updated: time.Now(), checked: time.Now(), command: "/nonexistent-jodu-test-command"}
+		updated: time.Now(), checked: time.Now(), fetch: func(context.Context) (reading, error) { return reading{}, errODUUnavailable }}
 	m.poll()
 	reading, _, reason := m.current()
 	if reason == "" || len(reading.Net) != 0 {

@@ -1,0 +1,88 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+
+./scripts/package.sh
+stage="$(mktemp -d)"
+trap 'rm -rf "$stage"' EXIT HUP INT TERM
+tar -xzf dist/verso-plugin-jodu5174x-linux-arm64.tar.gz -C "$stage"
+test -f "$stage/usr/share/verso/plugins/jodu5174x/default-config"
+test -f "$stage/usr/share/rpcd/acl.d/verso-jodu5174x.json"
+test -f "$stage/usr/libexec/verso-plugin-jodu5174x/post-install.sh"
+test ! -e "$stage/etc/config/jodu5174x"
+
+image=golang:1.27.1-alpine
+if ! command -v docker >/dev/null 2>&1 || ! docker image inspect "$image" >/dev/null 2>&1; then
+  echo 'Package paths checked; hook runtime check skipped (cached Docker image unavailable).'
+  exit 0
+fi
+
+cat >"$stage/test-hook.sh" <<'CONTAINER_TEST'
+#!/bin/sh
+set -eu
+mkdir -p /etc/config /etc/init.d /tmp/stubs
+for service in rpcd verso-plugin-jodu5174x verso; do
+  cat >"/etc/init.d/$service" <<'STUB'
+#!/bin/sh
+printf '%s %s\n' "${0##*/}" "$*" >>/tmp/hook-calls
+STUB
+  chmod 0755 "/etc/init.d/$service"
+done
+cat >/tmp/stubs/killall <<'STUB'
+#!/bin/sh
+printf 'killall %s\n' "$*" >>/tmp/hook-calls
+STUB
+chmod 0755 /tmp/stubs/killall
+PATH="/tmp/stubs:$PATH"
+export PATH
+
+sh /hook
+test -f /etc/config/jodu5174x
+test "$(stat -c '%a' /etc/config/jodu5174x)" = 600
+cmp /etc/config/jodu5174x /usr/share/verso/plugins/jodu5174x/default-config
+grep -qx 'rpcd reload' /tmp/hook-calls
+grep -qx 'verso-plugin-jodu5174x enable' /tmp/hook-calls
+grep -qx 'verso-plugin-jodu5174x restart' /tmp/hook-calls
+grep -qx 'killall -HUP verso' /tmp/hook-calls
+
+printf '%s\n' 'preserved-operator-config' >/etc/config/jodu5174x
+sh /hook
+grep -qx 'preserved-operator-config' /etc/config/jodu5174x
+test "$(stat -c '%a' /etc/config/jodu5174x)" = 600
+
+check_seed_failure() {
+  command="$1"
+  rm -f /etc/config/jodu5174x
+  mkdir -p "/tmp/fail-$command"
+  cat >"/tmp/fail-$command/$command" <<'FAIL'
+#!/bin/sh
+exit 23
+FAIL
+  chmod 0755 "/tmp/fail-$command/$command"
+  if PATH="/tmp/fail-$command:$PATH" sh /hook; then
+    echo "seed unexpectedly succeeded when $command failed" >&2
+    exit 1
+  fi
+  test ! -e /etc/config/jodu5174x
+  rm -rf "/tmp/fail-$command"
+}
+check_seed_failure cp
+check_seed_failure chmod
+check_seed_failure ln
+CONTAINER_TEST
+
+docker run --rm --pull=never --network none \
+  -v "$stage/usr/share/verso/plugins/jodu5174x/default-config:/usr/share/verso/plugins/jodu5174x/default-config:ro" \
+  -v "$stage/usr/libexec/verso-plugin-jodu5174x/post-install.sh:/hook:ro" \
+  -v "$stage/test-hook.sh:/test-hook.sh:ro" \
+  "$image" /bin/sh /test-hook.sh
+
+if docker run --rm --pull=never --network none \
+  -v "$stage/usr/libexec/verso-plugin-jodu5174x/post-install.sh:/hook:ro" \
+  "$image" /bin/sh -c 'mkdir -p /etc/config; if /bin/sh /hook; then exit 1; fi; test ! -e /etc/config/jodu5174x'; then
+  echo 'Missing-template failure check: ok'
+else
+  echo 'Missing-template failure check failed.' >&2
+  exit 1
+fi
+echo 'Package path and config preservation checks: ok'

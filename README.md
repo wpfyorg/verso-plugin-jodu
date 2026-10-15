@@ -1,21 +1,28 @@
-# Verso JODU5174x status plugin
+# Verso JODU5174x adapter
 
-A standalone [Verso](https://github.com/we-are-mono/verso) status dashboard for JODU51740/JODU51741 5G outdoor units on OpenWrt. It is intended for ARM64 routers, including JioRouter AX6000-class hardware.
+Standalone native Verso plugin for JODU51740/JODU51741 5G outdoor units on OpenWrt. It talks to the ODU's HTTPS CGI API directly; it does not call or package the separate LuCI add-on, its helper, curl, or proprietary assets.
 
-The plugin displays connection state, primary and secondary 5G carrier details, RSRP, RSRQ, SINR, BLER, ODU traffic counters and Ethernet link status. It also provides a Verso settings form for the ODU address, username, password and monitoring switch. Settings are staged for Verso's normal review and Apply flow. The status reader runs every 15 seconds and hides stale results when an ODU read fails.
+## Adapter features
 
-With the companion Verso `feat/plugin-overview-cards` change, the homepage also shows a **5G ODU** card with connection, radio, band, RSRP, SINR, Ethernet and last-check readings. Its link opens the full dashboard. It uses the same scoped configuration read as the dashboard and shows an unavailable message when permission, configuration or fresh telemetry is missing. Reload the homepage to refresh the card; it does not stream updates.
+The native adapter provides the Verso surfaces below:
 
-The homepage card requires both the companion Verso core change (based on v0.6.0) and this adapter build. Stock Verso v0.6.0 has no plugin homepage-card contract; installing this adapter alone keeps the existing status/settings pages but does not add a homepage card. The published v0.1.1 feed release does not include this change.
+| Surface | Feature |
+| --- | --- |
+| Status | Connection/radio state, primary and secondary carrier metrics, RSRP, RSRQ, SINR, BLER, ODU traffic counters, Ethernet link and last successful check |
+| Settings | ODU host, username and password, staged through Verso's Apply flow |
+| Monitoring | Server-side status refresh every 15 seconds; its switch is staged through Apply and defaults off until enabled with a saved password |
+| Reboot | Single-use confirmation form starts at most one immediate background request; page reload shows pending, confirmed or unconfirmed outcome |
+| Overview card | Read-only summary when the companion Verso `feat/plugin-overview-cards` core change is installed |
+
+These are the adapter's implemented surfaces. Exact parity with the separately licensed LuCI package has not been established. The homepage card requires both that companion Verso core change (based on v0.6.0) and this adapter; stock Verso v0.6.0 does not provide its contract. The signed v0.1.1 feed release does not include this native-backend change.
 
 ## Requirements
 
-- Verso with manifest v1 plugin support (developed against Verso 0.5.x).
-- OpenWrt with APK v3, `procd`, `curl`, `uci`, and compatible ARM64 package architecture (`aarch64_generic`).
-- The independently installed [luci-app-jodu5174x-status](https://github.com/anishthevictorious/luci-app-jodu5174x-status) 5.0-r1 package, including its `/usr/libexec/jodu5174x-data.sh` command and `/etc/config/jodu5174x` settings.
+- Verso with manifest v1 plugin support and OpenWrt with APK v3, `procd`, `rpcd` and UCI.
+- ARM64 package architecture (`aarch64_generic`) for router installs.
 - ODU reachable from the router at its HTTPS management address.
 
-The JODU LuCI package is **proprietary and not included here**. Install it separately under its own license. This repository contains only the independent Verso adapter.
+Monitoring is off by default. The package seeds `/etc/config/jodu5174x` only when that file is absent, with host `192.168.225.1`, username `Admin`, empty password and `enabled '0'`. Set the password and enable monitoring in Verso → **5G ODU** → **ODU Settings**. The config is mode `0600`; upgrades preserve its values.
 
 ## Build
 
@@ -25,69 +32,65 @@ With Go 1.22+ on macOS or Linux:
 ./scripts/package.sh
 ```
 
-This produces `dist/verso-plugin-jodu5174x-linux-arm64.tar.gz`, containing the standalone static ARM64 binary, the plugin manifest, and an OpenWrt `procd` service. No external Go modules are used.
+This creates `dist/verso-plugin-jodu5174x-linux-arm64.tar.gz` with the static ARM64 binary, manifest, service, scoped rpcd ACL, default-config template and install hook. No external Go modules are used.
 
-## Install on an ARM64 OpenWrt router
+To build the signed APK, run `scripts/build-apk.sh VERSION SIGNING_KEY` inside Alpine 3.23+ after `scripts/build.sh`. The package depends on Verso only; the native ODU client uses Go's standard library.
 
-First install and configure the original JODU LuCI package from its project or release page. This independently licensed, proprietary package must provide `/usr/libexec/jodu5174x-data.sh` and `/etc/config/jodu5174x`; its `main` section must contain the ODU address and credentials. The adapter does not include or modify that package.
+## Install
 
-The signed [v0.1.1 release](https://github.com/wpfyorg/verso-plugin-jodu5174x/releases/tag/v0.1.1) is available from the APK feed. Set up the feed once. Its public key and index are:
+The signed [v0.1.1 release](https://github.com/wpfyorg/verso-plugin-jodu5174x/releases/tag/v0.1.1) remains available from the APK feed, but it predates this native backend. Do not treat that release as containing the changes documented here.
+
+The existing feed key and index remain available:
 
 - Public signing key: <https://wpfyorg.github.io/verso-plugin-jodu5174x/verso-plugin-jodu5174x.pem>
 - APK repository: <https://wpfyorg.github.io/verso-plugin-jodu5174x/aarch64_generic/packages.adb>
 
-On the router, download and run the one-time setup script, then install normally:
+To install the published v0.1.1 package, configure the feed and install it with:
 
 ```sh
 uclient-fetch -O /tmp/jodu-feed.sh https://wpfyorg.github.io/verso-plugin-jodu5174x/setup-feed.sh
 sh /tmp/jodu-feed.sh
 apk update
 apk add verso-plugin-jodu5174x
-# Later, after a new release:
-apk update
-apk upgrade verso-plugin-jodu5174x
 ```
 
-The setup script adds the public key and `aarch64_generic` repository without changing other feeds. The package requires the independently licensed JODU LuCI package described above; install and configure it separately first. This feed does not bundle its code. The APK enables the plugin and refreshes Verso after install or upgrade. Keep ODU credentials and private backups out of this public repository.
+That package does **not** include the native backend described here. No version bump, feed update or release is part of this change.
 
-For local development, the manual tarball installation below remains available:
-
-Copy the built tarball to the router (replace `root@ROUTER` with your SSH destination):
+For the current native backend, build and install the local tarball:
 
 ```sh
 cat dist/verso-plugin-jodu5174x-linux-arm64.tar.gz | ssh root@ROUTER 'cat > /tmp/verso-plugin-jodu5174x.tar.gz'
-ssh root@ROUTER 'tar -xzf /tmp/verso-plugin-jodu5174x.tar.gz -C / && /etc/init.d/verso-plugin-jodu5174x enable && /etc/init.d/verso-plugin-jodu5174x restart && /etc/init.d/verso restart'
+ssh root@ROUTER 'tar -xzf /tmp/verso-plugin-jodu5174x.tar.gz -C / && sh /usr/libexec/verso-plugin-jodu5174x/post-install.sh'
 ```
 
-Open Verso → **5G ODU** (in the Status section). Use **ODU Settings** to stage changes and apply them using Verso's staged-changes bar. If status is unavailable, confirm `/usr/libexec/jodu5174x-data.sh` works on the router and that the logged-in account can read the JODU configuration.
+The hook seeds config only if absent, sets its mode to `0600`, reloads rpcd grants, enables/restarts the adapter and signals Verso to rescan plugins and refresh live grants. It does not print config values. Configure the password and monitoring switch in Verso after install. Existing config and credentials survive package upgrades and removal.
+
+For a future feed release, set up the APK feed and install `verso-plugin-jodu5174x` normally. Its package hook performs the same config-preserving setup. The existing public key and feed remain unchanged until a release is published.
 
 ## Remove
 
-For feed installations, run `apk del verso-plugin-jodu5174x`. The package removal hook stops the plugin and refreshes Verso. For the legacy tarball installation only:
+For feed installations, run `apk del verso-plugin-jodu5174x`. The adapter's UCI config is an unowned system file and remains in place. For a manual tar install:
 
 ```sh
-ssh root@ROUTER '/etc/init.d/verso-plugin-jodu5174x stop; /etc/init.d/verso-plugin-jodu5174x disable; rm -f /etc/init.d/verso-plugin-jodu5174x /usr/bin/verso-plugin-jodu5174x /usr/share/verso/plugins/jodu5174x/manifest.json; /etc/init.d/verso restart'
+ssh root@ROUTER '/etc/init.d/verso-plugin-jodu5174x stop; /etc/init.d/verso-plugin-jodu5174x disable; rm -f /etc/init.d/verso-plugin-jodu5174x /usr/bin/verso-plugin-jodu5174x /usr/share/verso/plugins/jodu5174x/manifest.json /usr/share/verso/plugins/jodu5174x/default-config /usr/share/rpcd/acl.d/verso-jodu5174x.json /usr/libexec/verso-plugin-jodu5174x/post-install.sh; /etc/init.d/rpcd reload; killall -HUP verso 2>/dev/null || /etc/init.d/verso restart'
 ```
 
-The underlying JODU package and `/etc/config/jodu5174x` remain installed.
+Remove `/etc/config/jodu5174x` separately only if you also want to delete the saved ODU credentials.
 
-## Design and limitations
-
-- Independent native JSON widget plugin over a private Unix socket; no LuCI iframe, JavaScript, CSS or upstream proprietary source is bundled.
-- Read permission for JODU UCI configuration is required before rendering live status. Passwords are never rendered. Settings write access is handled by Verso's rpcd ACL checks.
-- Rebooting the ODU is not implemented. Current Verso plugin commands do not expose an authorized ODU reboot action.
-- Dashboard refresh uses normal page reloads. Live polling happens server-side every 15 seconds; there is no push UI.
-- The optional `overview` manifest contribution requests `GET /overview`. It returns only a read-only summary; the companion shell supplies the card frame, link and saved layout controls. No write or command is available through this endpoint.
-- Tested with synthetic responses and a Linux ARM64 cross-build. The signed APK and trusted APK v3 index were verified in CI. **Installation on the target router, live JODU hardware, access control and Verso UI appearance remain unverified.**
-
-## Development
+## Development and verification
 
 ```sh
 go test ./...
 go vet ./...
 ./scripts/package.sh
+tar -tzf dist/verso-plugin-jodu5174x-linux-arm64.tar.gz
+./scripts/package.test.sh
 ```
 
-The feed uses an ECDSA P-256 signing key. Its private PEM stays outside the repository and is stored in the GitHub Actions secret `APK_SIGNING_KEY`; the corresponding public PEM is tracked as `verso-plugin-jodu5174x.pem`. The [v0.1.1 release](https://github.com/wpfyorg/verso-plugin-jodu5174x/releases/tag/v0.1.1) publishes package `0.1.1-r0`. Each higher version tag builds and signs a new package and deploys the feed through GitHub Pages. Existing tags and releases are never replaced.
+The packaging check exercises config creation, mode, upgrade preservation, and seed-failure handling in a cached Docker image (`golang:1.27.1-alpine`) with networking disabled. It still does not build/sign an APK.
 
-Project is MIT licensed; the upstream JODU package retains its separate license.
+Reboot acts immediately after confirmation; it does not wait for staged settings to be applied. It returns while the request runs in the background, then a page reload checks the outcome. No physical ODU reboot test has been run.
+
+The native client accepts the ODU's self-signed HTTPS certificate. It uses no proxy and does not follow redirects; exact request-behavior parity with the former curl helper is unverified. Authentication cookies and rotating request tokens stay in memory and are not logged. The adapter reads Ethernet routing/sysfs state locally. Synthetic API tests and Linux ARM64 cross-builds do not verify target-router behavior or hardware compatibility. Exact parity with proprietary LuCI behavior is unknown.
+
+Project is MIT licensed. The companion Verso core and ODU retain their own licenses.
