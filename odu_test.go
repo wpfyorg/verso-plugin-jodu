@@ -389,17 +389,18 @@ func TestODURebootAuthCancellationIsNotUnconfirmed(t *testing.T) {
 		releaseAuth()
 		s.Close()
 	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- c.Reboot(ctx, cfg) }()
 	select {
 	case <-started:
+		cancel()
 	case <-time.After(time.Second):
 		t.Fatal("authentication request did not start")
 	}
 	err := <-done
-	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errRebootUnconfirmed) {
+	if !errors.Is(err, context.Canceled) || errors.Is(err, errRebootUnconfirmed) {
 		t.Fatalf("pre-reboot auth cancellation returned %v", err)
 	}
 	if rebootCalls.Load() != 0 {
