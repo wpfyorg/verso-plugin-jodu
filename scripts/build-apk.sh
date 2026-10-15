@@ -41,5 +41,5 @@ apk mkpkg \
   --sign-key "$key" \
   --output "$repo/verso-plugin-jodu5174x-$version.apk"
 
-(cd "$repo" && apk mkndx --allow-untrusted --sign-key "$key" --output packages.adb ./*.apk)
+(cd "$repo" && apk mkndx --sign-key "$key" --output packages.adb ./*.apk)
 

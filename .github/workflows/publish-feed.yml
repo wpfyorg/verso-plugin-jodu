@@ -3,15 +3,9 @@ on:
   push:
     tags:
       - 'v[0-9]*'
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version without v prefix (e.g. 0.1.0)'
-        required: true
-        type: string
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -39,27 +33,59 @@ jobs:
       - name: Create signed APK and index
         env:
           APK_SIGNING_KEY: ${{ secrets.APK_SIGNING_KEY }}
-          INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           test -n "$APK_SIGNING_KEY"
-          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
-            version="$INPUT_VERSION"
-          else
-            version="${GITHUB_REF_NAME#v}"
-          fi
+          version="${GITHUB_REF_NAME#v}"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          tag="v$version"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
           printf '%s\n' "$APK_SIGNING_KEY" > "$RUNNER_TEMP/jodu-signing.pem"
           chmod 600 "$RUNNER_TEMP/jodu-signing.pem"
           docker run --rm \
             -v "$PWD:/repo" -v "$RUNNER_TEMP/jodu-signing.pem:/signing.pem:ro" \
             -w /repo alpine:3.23 \
-            sh scripts/build-apk.sh "$version-r0" /signing.pem
+            sh -eu -c '
+              mkdir -p /etc/apk/keys
+              cp verso-plugin-jodu5174x.pem /etc/apk/keys/verso-plugin-jodu5174x.pem
+              sh scripts/build-apk.sh "$1" /signing.pem
+            ' sh "$version-r0"
           cp verso-plugin-jodu5174x.pem scripts/setup-feed.sh site/
+          cp "site/aarch64_generic/verso-plugin-jodu5174x-$version-r0.apk" "$RUNNER_TEMP/"
           printf '%s\n' 'Signed package:'
           ls -lh site/aarch64_generic/
+      - name: Verify signed APK and trusted APK v3 repository
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD/site:/feed:ro" \
+            -v "$PWD/verso-plugin-jodu5174x.pem:/public.pem:ro" \
+            alpine:3.23 sh -eu -c '
+              mkdir -p /etc/apk/keys
+              cp /public.pem /etc/apk/keys/verso-plugin-jodu5174x.pem
+              apk verify /feed/aarch64_generic/*.apk
+              printf "%s\\n" "file:///feed/aarch64_generic/packages.adb" > /etc/apk/repositories
+              apk --arch aarch64_generic update
+              apk --arch aarch64_generic search -e verso-plugin-jodu5174x
+              apk --arch aarch64_generic policy verso-plugin-jodu5174x
+              apk adbdump /feed/aarch64_generic/packages.adb >/dev/null
+            '
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
       - id: deployment
         uses: actions/deploy-pages@v4
+      - name: Create immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          tag="v$version"
+          gh release create "$tag" "$RUNNER_TEMP/verso-plugin-jodu5174x-$version-r0.apk" \
+            --verify-tag --title "$tag" \
+            --notes "Signed OpenWrt APK v3 package and feed are published on GitHub Pages. See the repository README for installation and upgrade instructions."
