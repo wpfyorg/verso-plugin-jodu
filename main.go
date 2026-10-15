@@ -327,12 +327,16 @@ func (m *monitor) handler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Configuration read required", http.StatusForbidden)
 			return
 		}
-		if r.ParseForm() != nil || (r.PostForm.Get("enabled") != "0" && r.PostForm.Get("enabled") != "1") {
+		if r.ParseForm() != nil || (r.PostForm.Get("enabled") != "" && r.PostForm.Get("enabled") != "0" && r.PostForm.Get("enabled") != "1") {
 			http.Error(w, "Invalid monitoring setting", http.StatusBadRequest)
 			return
 		}
 		output = m.status(current)
-		if next := r.PostForm.Get("enabled"); next != current["enabled"] {
+		next := "0"
+		if r.PostForm.Get("enabled") == "1" {
+			next = "1"
+		}
+		if next != current["enabled"] {
 			output["commit"] = []any{map[string]any{"config": "jodu5174x", "section": "main", "values": map[string]string{"enabled": next}}}
 			output["notice"] = map[string]any{"level": "info", "text": "Monitoring change staged. Apply it from Verso's top bar."}
 		}

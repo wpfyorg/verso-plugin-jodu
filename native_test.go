@@ -90,7 +90,7 @@ func TestMonitoringToggleOnlyStagesEnabled(t *testing.T) {
 	if code != http.StatusBadRequest {
 		t.Fatal(code)
 	}
-	code, out = request(t, m, "POST", "/", "_action=monitor&enabled=0", configHeader(t))
+	code, out = request(t, m, "POST", "/", "_action=monitor", configHeader(t))
 	if code != http.StatusOK || out["commit"] == nil {
 		t.Fatal("same-page monitor form did not stage")
 	}
