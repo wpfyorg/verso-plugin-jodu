@@ -14,7 +14,7 @@ The native adapter provides the Verso surfaces below:
 | Reboot | Single-use confirmation form starts at most one immediate background request; page reload shows pending, confirmed or unconfirmed outcome |
 | Overview card | Read-only summary when the companion Verso `feat/plugin-overview-cards` core change is installed |
 
-These are the adapter's implemented surfaces. Exact parity with the separately licensed LuCI package has not been established. The homepage card requires both that companion Verso core change (based on v0.6.0) and this adapter; stock Verso v0.6.0 does not provide its contract. The signed v0.1.1 feed release does not include this native-backend change.
+These are the adapter's implemented surfaces. Exact parity with the separately licensed LuCI package has not been established. The homepage card requires both that companion Verso core change (based on v0.6.0) and this adapter; stock Verso v0.6.0 does not provide its contract. The v0.2.0 release introduces the native backend.
 
 ## Requirements
 
@@ -22,7 +22,7 @@ These are the adapter's implemented surfaces. Exact parity with the separately l
 - ARM64 package architecture (`aarch64_generic`) for router installs.
 - ODU reachable from the router at its HTTPS management address.
 
-Monitoring is off by default. The package seeds `/etc/config/jodu5174x` only when that file is absent, with host `192.168.225.1`, username `Admin`, empty password and `enabled '0'`. Set the password and enable monitoring in Verso → **5G ODU** → **ODU Settings**. The config is mode `0600`; upgrades preserve its values.
+Monitoring is off by default. The package seeds `/etc/config/jodu5174x` only when that file is absent, with host `192.168.225.1`, username `Admin`, empty password and `enabled '0'`. Set the password and enable monitoring in Verso → **System** → **ODU configuration**; view readings under **Network** → **ODU stats**. The config is mode `0600`; upgrades preserve its values.
 
 ## Build
 
@@ -38,25 +38,23 @@ To build the signed APK, run `scripts/build-apk.sh VERSION SIGNING_KEY` inside A
 
 ## Install
 
-The signed [v0.1.1 release](https://github.com/wpfyorg/verso-plugin-jodu5174x/releases/tag/v0.1.1) remains available from the APK feed, but it predates this native backend. Do not treat that release as containing the changes documented here.
+The signed [v0.2.0 release](https://github.com/wpfyorg/verso-plugin-jodu5174x/releases/tag/v0.2.0) includes the native ODU backend and sidebar integration.
 
 The existing feed key and index remain available:
 
 - Public signing key: <https://wpfyorg.github.io/verso-plugin-jodu5174x/verso-plugin-jodu5174x.pem>
 - APK repository: <https://wpfyorg.github.io/verso-plugin-jodu5174x/aarch64_generic/packages.adb>
 
-To install the published v0.1.1 package, configure the feed and install it with:
+Configure the feed and install or upgrade the package with:
 
 ```sh
 uclient-fetch -O /tmp/jodu-feed.sh https://wpfyorg.github.io/verso-plugin-jodu5174x/setup-feed.sh
 sh /tmp/jodu-feed.sh
 apk update
-apk add verso-plugin-jodu5174x
+apk add --upgrade verso-plugin-jodu5174x
 ```
 
-That package does **not** include the native backend described here. No version bump, feed update or release is part of this change.
-
-For the current native backend, build and install the local tarball:
+Alternatively, build and install the local tarball:
 
 ```sh
 cat dist/verso-plugin-jodu5174x-linux-arm64.tar.gz | ssh root@ROUTER 'cat > /tmp/verso-plugin-jodu5174x.tar.gz'
@@ -65,7 +63,7 @@ ssh root@ROUTER 'tar -xzf /tmp/verso-plugin-jodu5174x.tar.gz -C / && sh /usr/lib
 
 The hook seeds config only if absent, sets its mode to `0600`, reloads rpcd grants, enables/restarts the adapter and signals Verso to rescan plugins and refresh live grants. It does not print config values. Configure the password and monitoring switch in Verso after install. Existing config and credentials survive package upgrades and removal.
 
-For a future feed release, set up the APK feed and install `verso-plugin-jodu5174x` normally. Its package hook performs the same config-preserving setup. The existing public key and feed remain unchanged until a release is published.
+The signed APK uses the same config-preserving hook and existing public signing key. Package upgrades preserve the saved ODU settings.
 
 ## Remove
 
@@ -91,6 +89,6 @@ The packaging check exercises config creation, mode, upgrade preservation, and s
 
 Reboot acts immediately after confirmation; it does not wait for staged settings to be applied. It returns while the request runs in the background, then a page reload checks the outcome. No physical ODU reboot test has been run.
 
-The native client accepts the ODU's self-signed HTTPS certificate. It uses no proxy and does not follow redirects; exact request-behavior parity with the former curl helper is unverified. Authentication cookies and rotating request tokens stay in memory and are not logged. The adapter reads Ethernet routing/sysfs state locally. Synthetic API tests and Linux ARM64 cross-builds do not verify target-router behavior or hardware compatibility. Exact parity with proprietary LuCI behavior is unknown.
+The native client accepts the ODU's self-signed HTTPS certificate. It uses no proxy and does not follow redirects; exact request-behavior parity with the former curl helper is unverified. Authentication cookies and rotating request tokens stay in memory and are not logged. The adapter reads Ethernet routing/sysfs state locally. Live monitoring and configuration were verified on the target router with a JODU51741; other hardware and firmware remain unverified. Exact parity with proprietary LuCI behavior is unknown.
 
 Project is MIT licensed. The companion Verso core and ODU retain their own licenses.
