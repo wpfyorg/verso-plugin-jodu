@@ -46,19 +46,19 @@ func request(t *testing.T, m *monitor, method, path, data, header string) (int, 
 }
 
 func TestStatusRequiresScopedRead(t *testing.T) {
-	m := &monitor{value: reading{Net: map[string]any{"rsrp": "-75", "password": "hidden"}},
+	m := &monitor{value: reading{Net: map[string]any{"rsrp": "-75", "password": "hidden-password-value"}},
 		updated: time.Now(), checked: time.Now()}
 	code, out := request(t, m, "GET", "/", "", "")
 	if code != 200 {
 		t.Fatalf("status %d", code)
 	}
 	encoded, _ := json.Marshal(out)
-	if strings.Contains(string(encoded), "-75") || strings.Contains(string(encoded), "hidden") {
+	if strings.Contains(string(encoded), "-75") || strings.Contains(string(encoded), "hidden-password-value") {
 		t.Fatal("unauthorized status leaked ODU values")
 	}
 	_, out = request(t, m, "GET", "/", "", configHeader(t))
 	encoded, _ = json.Marshal(out)
-	if !strings.Contains(string(encoded), "-75") || strings.Contains(string(encoded), "hidden") {
+	if !strings.Contains(string(encoded), "-75") || strings.Contains(string(encoded), "hidden-password-value") {
 		t.Fatalf("wrong status fields: %s", encoded)
 	}
 }
