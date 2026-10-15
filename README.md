@@ -14,7 +14,7 @@ The native adapter provides the Verso surfaces below:
 | Reboot | Single-use confirmation form starts at most one immediate background request; page reload shows pending, confirmed or unconfirmed outcome |
 | Overview card | Read-only summary when the companion Verso `feat/plugin-overview-cards` core change is installed |
 
-These are the adapter's implemented surfaces. Exact parity with the separately licensed LuCI package has not been established. The homepage card requires both that companion Verso core change (based on v0.6.0) and this adapter; stock Verso v0.6.0 does not provide its contract. The v0.2.0 release introduces the native backend.
+These are the adapter's implemented surfaces. Exact parity with the separately licensed LuCI package has not been established. The homepage card requires both that companion Verso core change (based on v0.6.0) and this adapter; stock Verso v0.6.0 does not provide its contract. The v0.2.0 release introduces the native backend; v0.2.1 adds the dedicated service account required by Verso v0.7.0.
 
 ## Requirements
 
@@ -23,6 +23,10 @@ These are the adapter's implemented surfaces. Exact parity with the separately l
 - ODU reachable from the router at its HTTPS management address.
 
 Monitoring is off by default. The package seeds `/etc/config/jodu5174x` only when that file is absent, with host `192.168.225.1`, username `Admin`, empty password and `enabled '0'`. Set the password and enable monitoring in Verso → **System** → **ODU configuration**; view readings under **Network** → **ODU stats**. The config is mode `0600`; upgrades preserve its values.
+
+The UI and ODU HTTPS client run as `verso-plugin-jodu5174x`, matching Verso v0.7.0 socket identity checks. A separate root process reads only the committed JODU UCI configuration and publishes an atomic private runtime snapshot every five seconds. Snapshots expire after 45 seconds; pending Apply edits never drive monitoring. The saved `/etc/config/jodu5174x` remains root-owned and mode `0600`.
+
+Stock Verso core upgrades preserve the sidebar pages but replace a manually patched homepage-card binary. The card needs the companion core patch in every installed core version until upstream adopts that API; reinstalling this plugin alone cannot restore it.
 
 ## Build
 
@@ -38,7 +42,7 @@ To build the signed APK, run `scripts/build-apk.sh VERSION SIGNING_KEY` inside A
 
 ## Install
 
-The signed [v0.2.0 release](https://github.com/wpfyorg/verso-plugin-jodu5174x/releases/tag/v0.2.0) includes the native ODU backend and sidebar integration.
+The signed [v0.2.1 release](https://github.com/wpfyorg/verso-plugin-jodu5174x/releases/tag/v0.2.1) includes the native ODU backend and sidebar integration.
 
 The existing feed key and index remain available:
 

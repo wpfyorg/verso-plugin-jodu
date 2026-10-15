@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const defaultSocket = "/var/run/verso-plugin-jodu5174x/jodu5174x.sock"
+const defaultSocket = "/var/run/verso-plugin-jodu5174x/ui/jodu5174x.sock"
 
 type reading struct {
 	Net  map[string]any `json:"netstatus"`
@@ -399,7 +399,35 @@ func (m *monitor) handler(w http.ResponseWriter, r *http.Request) {
 }
 func main() {
 	socket := flag.String("socket", defaultSocket, "Unix socket path")
+	snapshotFile := flag.String("config-snapshot", "", "Private committed-config snapshot")
+	exportFile := flag.String("export-config", "", "Publish committed configuration without serving HTTP")
 	flag.Parse()
+	if *exportFile != "" {
+		account, err := user.Lookup("verso-plugin-jodu5174x")
+		if err != nil {
+			log.Fatal("plugin account unavailable")
+		}
+		uid, err := strconv.Atoi(account.Uid)
+		if err != nil || uid == 0 {
+			log.Fatal("invalid plugin account")
+		}
+		gid, err := strconv.Atoi(account.Gid)
+		if err != nil {
+			log.Fatal("invalid plugin group")
+		}
+		saveDir := strings.TrimSuffix(*exportFile, "/"+lastSegment(*exportFile)) + "/uci"
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err := exportODUConfig(ctx, "/sbin/uci", "/etc/config", saveDir, *exportFile, uid, gid)
+			cancel()
+			if err != nil {
+				log.Print("committed ODU configuration snapshot unavailable")
+			}
+			<-ticker.C
+		}
+	}
 	parent := strings.TrimSuffix(*socket, "/"+lastSegment(*socket))
 	if err := os.MkdirAll(parent, 0750); err != nil {
 		log.Fatal(err)
@@ -420,10 +448,16 @@ func main() {
 	if err := os.MkdirAll(configDir, 0700); err != nil {
 		log.Fatal(err)
 	}
+	loadConfig := func(ctx context.Context) (oduConfig, error) {
+		if *snapshotFile != "" {
+			return readConfigSnapshot(*snapshotFile)
+		}
+		return loadODUConfig(ctx, "/sbin/uci", "/etc/config", configDir)
+	}
 	client := newODUClient()
 	m := &monitor{
 		fetch: func(ctx context.Context) (reading, error) {
-			cfg, err := loadODUConfig(ctx, "/sbin/uci", "/etc/config", configDir)
+			cfg, err := loadConfig(ctx)
 			if err != nil {
 				return reading{}, err
 			}
@@ -432,7 +466,7 @@ func main() {
 			return value, err
 		},
 		reboot: func(ctx context.Context, host string) error {
-			cfg, err := loadODUConfig(ctx, "/sbin/uci", "/etc/config", configDir)
+			cfg, err := loadConfig(ctx)
 			if err != nil || cfg.Host != host {
 				return errConfigUnavailable
 			}

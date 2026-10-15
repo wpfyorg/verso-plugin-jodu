@@ -93,6 +93,26 @@ FAIL
 check_seed_failure cp
 check_seed_failure chmod
 check_seed_failure ln
+
+# The installed service must create an isolated non-root socket owner for
+# Verso 0.7 peer-credential checks; the config publisher alone remains root.
+grep -q '^verso:' /etc/group || echo 'verso:x:6000:' >>/etc/group
+grep -q '^verso:' /etc/passwd || echo 'verso:x:6000:6000:Verso:/tmp:/bin/false' >>/etc/passwd
+printf '#!/bin/sh\nexit 0\n' >/usr/bin/verso-plugin-jodu5174x
+chmod 0755 /usr/bin/verso-plugin-jodu5174x
+procd_open_instance() { printf 'instance %s\n' "$*" >>/tmp/procd-calls; }
+procd_set_param() { printf 'param %s\n' "$*" >>/tmp/procd-calls; }
+procd_close_instance() { :; }
+. /service
+start_service
+start_service
+test "$(id -u verso-plugin-jodu5174x)" != 0
+test "$(grep -c '^verso-plugin-jodu5174x:' /etc/passwd)" = 1
+test "$(stat -c '%u:%a' /var/run/verso-plugin-jodu5174x)" = 0:750
+test "$(stat -c '%u:%a' /var/run/verso-plugin-jodu5174x/ui)" = "$(id -u verso-plugin-jodu5174x):750"
+grep -qx 'param user verso-plugin-jodu5174x' /tmp/procd-calls
+grep -qx 'param group verso' /tmp/procd-calls
+grep -qx 'param command /usr/bin/verso-plugin-jodu5174x --export-config /var/run/verso-plugin-jodu5174x/config.json' /tmp/procd-calls
 CONTAINER_TEST
 
 docker run --rm --pull=never --network none \
@@ -100,6 +120,7 @@ docker run --rm --pull=never --network none \
   -v "$stage/usr/share/verso/plugins/jodu5174x/default-config:/usr/share/verso/plugins/jodu5174x/default-config:ro" \
   -v "$stage/usr/libexec/verso-plugin-jodu5174x/post-install.sh:/hook:ro" \
   -v "$stage/test-hook.sh:/test-hook.sh:ro" \
+  -v "$PWD/rootfs/etc/init.d/verso-plugin-jodu5174x:/service:ro" \
   "$image" /bin/sh /test-hook.sh
 
 if docker run --rm --pull=never --network none \
