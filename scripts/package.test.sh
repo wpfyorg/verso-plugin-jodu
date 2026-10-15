@@ -62,6 +62,18 @@ sh /hook
 grep -qx 'preserved-operator-config' /etc/config/jodu5174x
 test "$(stat -c '%a' /etc/config/jodu5174x)" = 600
 
+rm /etc/config/jodu5174x
+printf '%s\n' 'preserve-symlink-target' >/tmp/operator-config
+chmod 0644 /tmp/operator-config
+ln -s /tmp/operator-config /etc/config/jodu5174x
+if sh /hook; then
+  echo 'Symlink config unexpectedly accepted.' >&2
+  exit 1
+fi
+test -L /etc/config/jodu5174x
+grep -qx 'preserve-symlink-target' /tmp/operator-config
+test "$(stat -c '%a' /tmp/operator-config)" = 644
+
 check_seed_failure() {
   command="$1"
   rm -f /etc/config/jodu5174x

@@ -3,6 +3,7 @@
 config=/etc/config/jodu5174x
 template=/usr/share/verso/plugins/jodu5174x/default-config
 if [ -e "$config" ] || [ -L "$config" ]; then
+  [ ! -L "$config" ] || { echo 'JODU config path must not be a symlink.' >&2; exit 1; }
   [ -f "$config" ] || { echo 'JODU config path is not a regular file.' >&2; exit 1; }
 else
   [ -r "$template" ] || { echo 'JODU default config template is missing.' >&2; exit 1; }
