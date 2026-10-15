@@ -1,0 +1,65 @@
+name: Publish signed APK feed
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without v prefix (e.g. 0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages-feed
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'wpfyorg/verso-plugin-jodu5174x'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Verify and build
+        run: |
+          go test ./...
+          go vet ./...
+          ./scripts/build.sh
+      - name: Create signed APK and index
+        env:
+          APK_SIGNING_KEY: ${{ secrets.APK_SIGNING_KEY }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test -n "$APK_SIGNING_KEY"
+          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
+            version="$INPUT_VERSION"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          printf '%s\n' "$APK_SIGNING_KEY" > "$RUNNER_TEMP/jodu-signing.pem"
+          chmod 600 "$RUNNER_TEMP/jodu-signing.pem"
+          docker run --rm \
+            -v "$PWD:/repo" -v "$RUNNER_TEMP/jodu-signing.pem:/signing.pem:ro" \
+            -w /repo alpine:3.23 \
+            sh scripts/build-apk.sh "$version-r0" /signing.pem
+          cp verso-plugin-jodu5174x.pem scripts/setup-feed.sh site/
+          printf '%s\n' 'Signed package:'
+          ls -lh site/aarch64_generic/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

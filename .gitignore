@@ -1,1 +1,4 @@
 dist/
+site/
+signing.pem
+*-private.pem

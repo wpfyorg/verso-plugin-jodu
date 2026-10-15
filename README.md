@@ -25,7 +25,25 @@ This produces `dist/verso-plugin-jodu5174x-linux-arm64.tar.gz`, containing the s
 
 ## Install on an ARM64 OpenWrt router
 
-First install and configure the original JODU LuCI package from its release page above. Its `/etc/config/jodu5174x` must contain a `main` section with the correct ODU address and credentials. The adapter itself does not modify that package.
+First install and configure the original JODU LuCI package from its release page above. This independently licensed, proprietary package must provide `/usr/libexec/jodu5174x-data.sh` and `/etc/config/jodu5174x`; its `main` section must contain the ODU address and credentials. The adapter does not include or modify that package.
+
+Once the first signed release is published, set up this project's APK feed once. The public key and repository URLs are:
+
+- Public signing key: <https://wpfyorg.github.io/verso-plugin-jodu5174x/verso-plugin-jodu5174x.pem>
+- APK repository: <https://wpfyorg.github.io/verso-plugin-jodu5174x/aarch64_generic/packages.adb>
+
+On the router, download and run the one-time setup script, then install normally:
+
+```sh
+uclient-fetch -O /tmp/jodu-feed.sh https://wpfyorg.github.io/verso-plugin-jodu5174x/setup-feed.sh
+sh /tmp/jodu-feed.sh
+apk update
+apk add verso-plugin-jodu5174x
+```
+
+The setup script adds the public key and `aarch64_generic` repository without altering existing feeds. The APK enables the plugin and restarts Verso automatically. The key verifies package signatures; do not use `--allow-untrusted`. Keep ODU credentials and private backups out of this public repository.
+
+For local development, the manual tarball installation below remains available:
 
 Copy the built tarball to the router (replace `root@ROUTER` with your SSH destination):
 
@@ -37,6 +55,8 @@ ssh root@ROUTER 'tar -xzf /tmp/verso-plugin-jodu5174x.tar.gz -C / && /etc/init.d
 Open Verso → **5G ODU** (in the Status section). Use **ODU Settings** to stage changes and apply them using Verso's staged-changes bar. If status is unavailable, confirm `/usr/libexec/jodu5174x-data.sh` works on the router and that the logged-in account can read the JODU configuration.
 
 ## Remove
+
+For feed installations, run `apk del verso-plugin-jodu5174x`. The package removal hook stops the plugin and refreshes Verso. For the legacy tarball installation only:
 
 ```sh
 ssh root@ROUTER '/etc/init.d/verso-plugin-jodu5174x stop; /etc/init.d/verso-plugin-jodu5174x disable; rm -f /etc/init.d/verso-plugin-jodu5174x /usr/bin/verso-plugin-jodu5174x /usr/share/verso/plugins/jodu5174x/manifest.json; /etc/init.d/verso restart'
@@ -59,5 +79,7 @@ go test ./...
 go vet ./...
 ./scripts/package.sh
 ```
+
+Publishing the signed feed requires a stable Ed25519 private signing key in the GitHub Actions secret `APK_SIGNING_KEY` and its corresponding public key tracked as `verso-plugin-jodu5174x.pem`. Keep the private key outside the repository. Once configured, push a release tag such as `v0.1.0` to build and publish `0.1.0-r0` through the GitHub Pages workflow. Use a higher version tag for future upgrades.
 
 Project is MIT licensed; the upstream JODU package retains its separate license.
