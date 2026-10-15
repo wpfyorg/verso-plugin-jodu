@@ -45,7 +45,10 @@ chmod 0755 /tmp/stubs/killall
 PATH="/tmp/stubs:$PATH"
 export PATH
 
-sh /hook
+mkdir -p /tmp/no-stat
+printf '#!/bin/sh\nexit 127\n' >/tmp/no-stat/stat
+chmod 0755 /tmp/no-stat/stat
+PATH="/tmp/no-stat:$PATH" sh /hook
 test -f /etc/config/jodu5174x
 test "$(stat -c '%a' /etc/config/jodu5174x)" = 600
 cmp /etc/config/jodu5174x /usr/share/verso/plugins/jodu5174x/default-config

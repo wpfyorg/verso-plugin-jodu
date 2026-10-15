@@ -26,8 +26,6 @@ else
 fi
 [ -f "$config" ] || { echo 'JODU config was not created.' >&2; exit 1; }
 chmod 0600 "$config" || { echo 'Could not protect the JODU config.' >&2; exit 1; }
-mode="$(stat -c '%a' "$config")" || { echo 'Could not verify JODU config mode.' >&2; exit 1; }
-[ "$mode" = 600 ] || { echo 'JODU config mode is not 0600.' >&2; exit 1; }
 [ -x /etc/init.d/rpcd ] && /etc/init.d/rpcd reload 2>/dev/null
 [ -x /etc/init.d/verso-plugin-jodu5174x ] && {
   /etc/init.d/verso-plugin-jodu5174x enable
