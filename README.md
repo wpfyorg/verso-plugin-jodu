@@ -25,9 +25,9 @@ This produces `dist/verso-plugin-jodu5174x-linux-arm64.tar.gz`, containing the s
 
 ## Install on an ARM64 OpenWrt router
 
-First install and configure the original JODU LuCI package from its release page above. This independently licensed, proprietary package must provide `/usr/libexec/jodu5174x-data.sh` and `/etc/config/jodu5174x`; its `main` section must contain the ODU address and credentials. The adapter does not include or modify that package.
+First install and configure the original JODU LuCI package from its project or release page. This independently licensed, proprietary package must provide `/usr/libexec/jodu5174x-data.sh` and `/etc/config/jodu5174x`; its `main` section must contain the ODU address and credentials. The adapter does not include or modify that package.
 
-Set up this project's APK feed once. The public key and repository URLs are:
+The signed [v0.1.0 release](https://github.com/wpfyorg/verso-plugin-jodu5174x/releases/tag/v0.1.0) is available from the APK feed. Set up the feed once. Its public key and index are:
 
 - Public signing key: <https://wpfyorg.github.io/verso-plugin-jodu5174x/verso-plugin-jodu5174x.pem>
 - APK repository: <https://wpfyorg.github.io/verso-plugin-jodu5174x/aarch64_generic/packages.adb>
@@ -39,19 +39,12 @@ uclient-fetch -O /tmp/jodu-feed.sh https://wpfyorg.github.io/verso-plugin-jodu51
 sh /tmp/jodu-feed.sh
 apk update
 apk add verso-plugin-jodu5174x
-```
-
-The setup script adds the public key and `aarch64_generic` repository without changing other feeds. Then install and later upgrade the plugin with:
-
-```sh
-apk update
-apk add verso-plugin-jodu5174x
 # Later, after a new release:
 apk update
 apk upgrade verso-plugin-jodu5174x
 ```
 
-The package requires the independently licensed JODU LuCI package described above; install and configure that package separately first. This feed does not bundle its code. The APK enables the plugin and refreshes Verso after install or upgrade. Keep ODU credentials and private backups out of this public repository.
+The setup script adds the public key and `aarch64_generic` repository without changing other feeds. The package requires the independently licensed JODU LuCI package described above; install and configure it separately first. This feed does not bundle its code. The APK enables the plugin and refreshes Verso after install or upgrade. Keep ODU credentials and private backups out of this public repository.
 
 For local development, the manual tarball installation below remains available:
 
@@ -80,7 +73,7 @@ The underlying JODU package and `/etc/config/jodu5174x` remain installed.
 - Read permission for JODU UCI configuration is required before rendering live status. Passwords are never rendered. Settings write access is handled by Verso's rpcd ACL checks.
 - Rebooting the ODU is not implemented. Current Verso plugin commands do not expose an authorized ODU reboot action.
 - Dashboard refresh uses normal page reloads. Live polling happens server-side every 15 seconds; there is no push UI.
-- Tested with synthetic responses and a Linux ARM64 cross-build. **Not yet validated on live JODU hardware or installed on a router.** Package installation, access control and Verso UI appearance still require live verification.
+- Tested with synthetic responses and a Linux ARM64 cross-build. The signed APK and trusted APK v3 index were verified in CI. **Installation on the target router, live JODU hardware, access control and Verso UI appearance remain unverified.**
 
 ## Development
 
@@ -90,6 +83,6 @@ go vet ./...
 ./scripts/package.sh
 ```
 
-The feed uses an ECDSA P-256 signing key. Its private PEM stays outside the repository and is stored in the GitHub Actions secret `APK_SIGNING_KEY`; the corresponding public PEM is tracked as `verso-plugin-jodu5174x.pem`. Pushing a new version tag such as `v0.1.0` builds and signs package `0.1.0-r0`, creates a GitHub release, and deploys the feed through GitHub Pages. Existing tags and releases are never replaced. Use a higher version tag for upgrades.
+The feed uses an ECDSA P-256 signing key. Its private PEM stays outside the repository and is stored in the GitHub Actions secret `APK_SIGNING_KEY`; the corresponding public PEM is tracked as `verso-plugin-jodu5174x.pem`. The [v0.1.0 release](https://github.com/wpfyorg/verso-plugin-jodu5174x/releases/tag/v0.1.0) publishes package `0.1.0-r0`. Each higher version tag builds and signs a new package and deploys the feed through GitHub Pages. Existing tags and releases are never replaced.
 
 Project is MIT licensed; the upstream JODU package retains its separate license.
