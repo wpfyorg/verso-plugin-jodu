@@ -4,7 +4,7 @@
   "schema_version":1,
   "socket":"/var/run/verso-plugin-jodu5174x/jodu5174x.sock",
   "overview":{"path":"/overview","icon":"radio"},
-  "nav":[{"section":"Status","label":"5G ODU","path":"/","icon":"radio"},{"section":"Status","label":"ODU Settings","path":"/settings","icon":"settings"}],
+  "nav":[{"section":"Network","label":"ODU stats","path":"/","icon":"radio"},{"section":"System","label":"ODU configuration","path":"/settings","icon":"settings"}],
   "acl":{"read":[{"scope":"uci","object":"jodu5174x","function":"read"}],"write":[{"scope":"uci","object":"jodu5174x","function":"write"}]},
   "secrets":["jodu5174x.password"]
 }
