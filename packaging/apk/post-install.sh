@@ -21,6 +21,10 @@ if [ -e "$config" ] || [ -L "$config" ]; then
   [ ! -L "$config" ] || { echo 'JODU config path must not be a symlink.' >&2; exit 1; }
   [ -f "$config" ] || { echo 'JODU config path is not a regular file.' >&2; exit 1; }
 else
+  [ -r "$template" ] || {
+    echo 'JODU default config template is missing.' >&2
+    exit 1
+  }
   umask 077
   tmp="$(mktemp /etc/config/.jodu.XXXXXX)" || exit 1
   if [ -f "$legacy_config" ] && [ ! -L "$legacy_config" ]; then
@@ -29,8 +33,12 @@ else
       echo 'Could not prepare JODU config migration.' >&2
       exit 1
     }
-    if ! uci -q -c "$work" -P "$work" set jodu.main=jodu ||
-       ! uci -q -c "$work" -P "$work" set jodu.main.model=jodu5174x; then
+    if ! cp "$template" "$work/jodu" || ! chmod 0600 "$work/jodu"; then
+      rm -rf "$work" "$tmp"
+      echo 'Could not prepare JODU config migration.' >&2
+      exit 1
+    fi
+    if ! uci -q -c "$work" -P "$work" set jodu.main.model=jodu5174x; then
       rm -rf "$work" "$tmp"
       echo 'Could not prepare JODU config migration.' >&2
       exit 1
@@ -51,11 +59,6 @@ else
     fi
     rm -rf "$work"
   else
-    [ -r "$template" ] || {
-      rm -f "$tmp"
-      echo 'JODU default config template is missing.' >&2
-      exit 1
-    }
     if ! cp "$template" "$tmp"; then
       rm -f "$tmp"
       echo 'Could not prepare the JODU config.' >&2

@@ -61,6 +61,10 @@ while [ "$#" -gt 0 ]; do
       exit 0
       ;;
     set)
+      if [ ! -f "$configdir/jodu" ]; then
+        echo 'UCI package missing before set.' >&2
+        exit 1
+      fi
       printf '%s\n' "$2" >>/tmp/uci-sets
       exit 0
       ;;
