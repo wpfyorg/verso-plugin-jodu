@@ -33,7 +33,7 @@ apk mkpkg \
   --info arch:aarch64_generic \
   --info 'description:Verso plugin for JODU 5G outdoor units' \
   --info license:MIT \
-  --info url:https://github.com/wpfyorg/verso-plugin-jodu5174x \
+  --info url:https://github.com/wpfyorg/verso-plugin-jodu \
   --info origin:verso-plugin-jodu \
   --info replaces:verso-plugin-jodu5174x \
   --info 'depends:verso' \
