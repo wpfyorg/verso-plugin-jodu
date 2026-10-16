@@ -1,4 +1,5 @@
-config jodu5174x 'main'
+config jodu 'main'
+	option model 'jodu5174x'
 	option host '192.168.225.1'
 	option username 'Admin'
 	option password ''

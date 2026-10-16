@@ -3,17 +3,20 @@ set -eu
 cd "$(dirname "$0")/.."
 
 ./scripts/package.sh
-if tar -tzf dist/verso-plugin-jodu5174x-linux-arm64.tar.gz | grep -E '(^|/)\._' >/dev/null; then
+archive=dist/verso-plugin-jodu-linux-arm64.tar.gz
+if tar -tzf "$archive" | grep -E '(^|/)\._' >/dev/null; then
   echo 'Router archive contains macOS metadata files.' >&2
   exit 1
 fi
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT HUP INT TERM
-tar -xzf dist/verso-plugin-jodu5174x-linux-arm64.tar.gz -C "$stage"
-test -f "$stage/usr/share/verso/plugins/jodu5174x/default-config"
-test -f "$stage/usr/share/rpcd/acl.d/verso-jodu5174x.json"
-test -f "$stage/usr/libexec/verso-plugin-jodu5174x/post-install.sh"
-test ! -e "$stage/etc/config/jodu5174x"
+tar -xzf "$archive" -C "$stage"
+test -f "$stage/usr/share/verso/plugins/jodu/default-config"
+test -f "$stage/usr/share/rpcd/acl.d/verso-jodu.json"
+test -f "$stage/usr/libexec/verso-plugin-jodu/post-install.sh"
+test ! -e "$stage/etc/config/jodu"
+grep -q '"id":"jodu"' "$stage/usr/share/verso/plugins/jodu/manifest.json"
+grep -q '"socket":"/var/run/verso-plugin-jodu/ui/jodu.sock"' "$stage/usr/share/verso/plugins/jodu/manifest.json"
 
 image=golang:1.27.1-alpine
 if ! command -v docker >/dev/null 2>&1 || ! docker image inspect "$image" >/dev/null 2>&1; then
@@ -25,18 +28,58 @@ cat >"$stage/test-hook.sh" <<'CONTAINER_TEST'
 #!/bin/sh
 set -eu
 mkdir -p /tmp/package-owner
-tar -xzf /package -C /tmp/package-owner
-for path in usr etc usr/share/rpcd/acl.d/verso-jodu5174x.json usr/bin/verso-plugin-jodu5174x; do
+ tar -xzf /package -C /tmp/package-owner
+for path in usr etc usr/share/rpcd/acl.d/verso-jodu.json usr/bin/verso-plugin-jodu; do
   test "$(stat -c '%u:%g' "/tmp/package-owner/$path")" = 0:0
 done
 mkdir -p /etc/config /etc/init.d /tmp/stubs
-for service in rpcd verso-plugin-jodu5174x verso; do
+for service in rpcd verso-plugin-jodu verso-plugin-jodu5174x verso; do
   cat >"/etc/init.d/$service" <<'STUB'
 #!/bin/sh
 printf '%s %s\n' "${0##*/}" "$*" >>/tmp/hook-calls
 STUB
   chmod 0755 "/etc/init.d/$service"
 done
+cat >/tmp/stubs/uci <<'STUB'
+#!/bin/sh
+set -eu
+configdir=/etc/config
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -q) shift ;;
+    -c) configdir="$2"; shift 2 ;;
+    -P) shift 2 ;;
+    get)
+      option="${2##*.}"
+      case "$option" in
+        host) printf '%s\n' '192.0.2.1' ;;
+        username) printf '%s\n' 'operator' ;;
+        password) printf '%s\n' 'migration-secret-value' ;;
+        enabled) printf '%s\n' '1' ;;
+        *) exit 1 ;;
+      esac
+      exit 0
+      ;;
+    set)
+      printf '%s\n' "$2" >>/tmp/uci-sets
+      exit 0
+      ;;
+    commit)
+      cat >"$configdir/jodu" <<'CONFIG'
+config jodu 'main'
+	option model 'jodu5174x'
+	option host '192.0.2.1'
+	option username 'operator'
+	option password 'migration-secret-value'
+	option enabled '1'
+CONFIG
+      exit 0
+      ;;
+    *) exit 2 ;;
+  esac
+done
+STUB
+chmod 0755 /tmp/stubs/uci
 cat >/tmp/stubs/killall <<'STUB'
 #!/bin/sh
 printf 'killall %s\n' "$*" >>/tmp/hook-calls
@@ -48,87 +91,94 @@ export PATH
 mkdir -p /tmp/no-stat
 printf '#!/bin/sh\nexit 127\n' >/tmp/no-stat/stat
 chmod 0755 /tmp/no-stat/stat
-PATH="/tmp/no-stat:$PATH" sh /hook
-test -f /etc/config/jodu5174x
-test "$(stat -c '%a' /etc/config/jodu5174x)" = 600
-cmp /etc/config/jodu5174x /usr/share/verso/plugins/jodu5174x/default-config
+PATH="/tmp/no-stat:$PATH" sh /hook >/tmp/hook-output 2>&1
+test -f /etc/config/jodu
+test "$(stat -c '%a' /etc/config/jodu)" = 600
+cmp /etc/config/jodu /usr/share/verso/plugins/jodu/default-config
 grep -qx 'rpcd reload' /tmp/hook-calls
-grep -qx 'verso-plugin-jodu5174x enable' /tmp/hook-calls
-grep -qx 'verso-plugin-jodu5174x restart' /tmp/hook-calls
+grep -qx 'verso-plugin-jodu enable' /tmp/hook-calls
+grep -qx 'verso-plugin-jodu restart' /tmp/hook-calls
 grep -qx 'killall -HUP verso' /tmp/hook-calls
 
-printf '%s\n' 'preserved-operator-config' >/etc/config/jodu5174x
-sh /hook
-grep -qx 'preserved-operator-config' /etc/config/jodu5174x
-test "$(stat -c '%a' /etc/config/jodu5174x)" = 600
+# Migration copies only the supported settings and never writes the old file.
+rm /etc/config/jodu
+cat >/etc/config/jodu5174x <<'LEGACY'
+config jodu5174x 'main'
+	option host '192.0.2.1'
+	option username 'operator'
+	option password 'migration-secret-value'
+	option enabled '1'
+	option unsupported 'do-not-copy'
+LEGACY
+: >/tmp/hook-calls
+sh /hook >/tmp/hook-output 2>&1
+grep -qx "option model 'jodu5174x'" /etc/config/jodu
+grep -qx "option host '192.0.2.1'" /etc/config/jodu
+grep -qx "option username 'operator'" /etc/config/jodu
+grep -qx "option password 'migration-secret-value'" /etc/config/jodu
+grep -qx "option enabled '1'" /etc/config/jodu
+! grep -q 'unsupported' /etc/config/jodu
+grep -qx "option password 'migration-secret-value'" /etc/config/jodu5174x
+test "$(stat -c '%a' /etc/config/jodu)" = 600
+! grep -q 'migration-secret-value' /tmp/hook-output
 
-rm /etc/config/jodu5174x
+# Existing new-format config wins, and is protected without being rewritten.
+printf '%s\n' 'existing-new-config' >/etc/config/jodu
+sh /hook >/tmp/hook-output 2>&1
+grep -qx 'existing-new-config' /etc/config/jodu
+test "$(stat -c '%a' /etc/config/jodu)" = 600
+
+rm /etc/config/jodu
 printf '%s\n' 'preserve-symlink-target' >/tmp/operator-config
 chmod 0644 /tmp/operator-config
-ln -s /tmp/operator-config /etc/config/jodu5174x
-if sh /hook; then
+ln -s /tmp/operator-config /etc/config/jodu
+if sh /hook >/tmp/hook-output 2>&1; then
   echo 'Symlink config unexpectedly accepted.' >&2
   exit 1
 fi
-test -L /etc/config/jodu5174x
+test -L /etc/config/jodu
 grep -qx 'preserve-symlink-target' /tmp/operator-config
 test "$(stat -c '%a' /tmp/operator-config)" = 644
 
-check_seed_failure() {
-  command="$1"
-  rm -f /etc/config/jodu5174x
-  mkdir -p "/tmp/fail-$command"
-  cat >"/tmp/fail-$command/$command" <<'FAIL'
-#!/bin/sh
-exit 23
-FAIL
-  chmod 0755 "/tmp/fail-$command/$command"
-  if PATH="/tmp/fail-$command:$PATH" sh /hook; then
-    echo "seed unexpectedly succeeded when $command failed" >&2
-    exit 1
-  fi
-  test ! -e /etc/config/jodu5174x
-  rm -rf "/tmp/fail-$command"
-}
-check_seed_failure cp
-check_seed_failure chmod
-check_seed_failure ln
+# The old service is stopped/disabled and its exact stale manifest is removed.
+mkdir -p /usr/share/verso/plugins/jodu5174x /usr/share/rpcd/acl.d
+: >/usr/share/verso/plugins/jodu5174x/manifest.json
+: >/usr/share/rpcd/acl.d/verso-jodu5174x.json
+rm /etc/config/jodu
+sh /hook >/tmp/hook-output 2>&1
+grep -qx 'verso-plugin-jodu5174x stop' /tmp/hook-calls
+grep -qx 'verso-plugin-jodu5174x disable' /tmp/hook-calls
+grep -qx 'killall -q verso-plugin-jodu5174x' /tmp/hook-calls
+test ! -e /usr/share/verso/plugins/jodu5174x/manifest.json
+test ! -e /usr/share/rpcd/acl.d/verso-jodu5174x.json
 
-# The installed service must create an isolated non-root socket owner for
-# Verso 0.7 peer-credential checks; the config publisher alone remains root.
 grep -q '^verso:' /etc/group || echo 'verso:x:6000:' >>/etc/group
 grep -q '^verso:' /etc/passwd || echo 'verso:x:6000:6000:Verso:/tmp:/bin/false' >>/etc/passwd
-printf '#!/bin/sh\nexit 0\n' >/usr/bin/verso-plugin-jodu5174x
-chmod 0755 /usr/bin/verso-plugin-jodu5174x
+printf '#!/bin/sh\nexit 0\n' >/usr/bin/verso-plugin-jodu
+chmod 0755 /usr/bin/verso-plugin-jodu
 procd_open_instance() { printf 'instance %s\n' "$*" >>/tmp/procd-calls; }
 procd_set_param() { printf 'param %s\n' "$*" >>/tmp/procd-calls; }
 procd_close_instance() { :; }
 . /service
 start_service
 start_service
-test "$(id -u verso-plugin-jodu5174x)" != 0
-test "$(grep -c '^verso-plugin-jodu5174x:' /etc/passwd)" = 1
-test "$(stat -c '%u:%a' /var/run/verso-plugin-jodu5174x)" = 0:750
-test "$(stat -c '%u:%a' /var/run/verso-plugin-jodu5174x/ui)" = "$(id -u verso-plugin-jodu5174x):750"
-grep -qx 'param user verso-plugin-jodu5174x' /tmp/procd-calls
+test "$(id -u verso-plugin-jodu)" != 0
+test "$(grep -c '^verso-plugin-jodu:' /etc/passwd)" = 1
+test "$(stat -c '%u:%a' /var/run/verso-plugin-jodu)" = 0:750
+test "$(stat -c '%u:%a' /var/run/verso-plugin-jodu/ui)" = "$(id -u verso-plugin-jodu):750"
+grep -qx 'param user verso-plugin-jodu' /tmp/procd-calls
 grep -qx 'param group verso' /tmp/procd-calls
-grep -qx 'param command /usr/bin/verso-plugin-jodu5174x --export-config /var/run/verso-plugin-jodu5174x/config.json' /tmp/procd-calls
+grep -qx 'param command /usr/bin/verso-plugin-jodu --export-config /var/run/verso-plugin-jodu/config.json' /tmp/procd-calls
 CONTAINER_TEST
 
+chmod 0755 "$stage/test-hook.sh"
+mkdir -p "$stage/usr/share/verso/plugins/jodu" "$stage/usr/libexec/verso-plugin-jodu"
 docker run --rm --pull=never --network none \
-  -v "$PWD/dist/verso-plugin-jodu5174x-linux-arm64.tar.gz:/package:ro" \
-  -v "$stage/usr/share/verso/plugins/jodu5174x/default-config:/usr/share/verso/plugins/jodu5174x/default-config:ro" \
-  -v "$stage/usr/libexec/verso-plugin-jodu5174x/post-install.sh:/hook:ro" \
+  -v "$PWD/$archive:/package:ro" \
+  -v "$stage/usr/share/verso/plugins/jodu/default-config:/usr/share/verso/plugins/jodu/default-config:ro" \
+  -v "$stage/usr/libexec/verso-plugin-jodu/post-install.sh:/hook:ro" \
   -v "$stage/test-hook.sh:/test-hook.sh:ro" \
-  -v "$PWD/rootfs/etc/init.d/verso-plugin-jodu5174x:/service:ro" \
+  -v "$PWD/rootfs/etc/init.d/verso-plugin-jodu:/service:ro" \
   "$image" /bin/sh /test-hook.sh
 
-if docker run --rm --pull=never --network none \
-  -v "$stage/usr/libexec/verso-plugin-jodu5174x/post-install.sh:/hook:ro" \
-  "$image" /bin/sh -c 'mkdir -p /etc/config; if /bin/sh /hook; then exit 1; fi; test ! -e /etc/config/jodu5174x'; then
-  echo 'Missing-template failure check: ok'
-else
-  echo 'Missing-template failure check failed.' >&2
-  exit 1
-fi
-echo 'Package path and config preservation checks: ok'
+echo 'Package path and migration checks: ok'

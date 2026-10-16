@@ -15,4 +15,5 @@ chmod 0644 "$key"
 printf '%s\n' "$url/aarch64_generic/packages.adb" > "$list"
 grep -qxF aarch64_generic /etc/apk/arch || printf '%s\n' aarch64_generic >> /etc/apk/arch
 
-echo 'Feed configured. Run: apk update && apk add verso-plugin-jodu5174x'
+echo 'Feed configured. For an existing install, run: apk add verso-plugin-jodu && apk del verso-plugin-jodu5174x'
+echo 'For a new install, run: apk update && apk add verso-plugin-jodu'

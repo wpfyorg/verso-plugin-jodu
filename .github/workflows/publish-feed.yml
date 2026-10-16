@@ -72,7 +72,7 @@ jobs:
               chown -R "$2:$3" site
             ' sh "$version-r0" "$host_uid" "$host_gid"
           cp verso-plugin-jodu5174x.pem scripts/setup-feed.sh site/
-          cp "site/aarch64_generic/verso-plugin-jodu5174x-$version-r0.apk" "$RUNNER_TEMP/"
+          cp "site/aarch64_generic/verso-plugin-jodu-$version-r0.apk" "$RUNNER_TEMP/"
           printf '%s\n' 'Signed package:'
           ls -lh site/aarch64_generic/
       - name: Verify signed APK and trusted APK v3 repository
@@ -87,8 +87,8 @@ jobs:
               apk verify /feed/aarch64_generic/*.apk
               printf "%s\\n" "file:///feed/aarch64_generic/packages.adb" > /etc/apk/repositories
               apk --arch aarch64_generic update
-              apk --arch aarch64_generic search -e verso-plugin-jodu5174x
-              apk --arch aarch64_generic policy verso-plugin-jodu5174x
+              apk --arch aarch64_generic search -e verso-plugin-jodu
+              apk --arch aarch64_generic policy verso-plugin-jodu
               apk adbdump /feed/aarch64_generic/packages.adb >/dev/null
             '
       - uses: actions/upload-pages-artifact@v3
@@ -108,6 +108,6 @@ jobs:
             version="${GITHUB_REF_NAME#v}"
           fi
           tag="v$version"
-          gh release create "$tag" "$RUNNER_TEMP/verso-plugin-jodu5174x-$version-r0.apk" \
+          gh release create "$tag" "$RUNNER_TEMP/verso-plugin-jodu-$version-r0.apk" \
             --verify-tag --title "$tag" \
             --notes "Signed OpenWrt APK v3 package and feed are published on GitHub Pages. See the repository README for installation and upgrade instructions."

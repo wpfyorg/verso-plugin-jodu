@@ -1,0 +1,11 @@
+{
+  "verso-jodu": {
+    "description": "Verso JODU adapter access to its own settings",
+    "read": {
+      "uci": ["jodu"]
+    },
+    "write": {
+      "uci": ["jodu"]
+    }
+  }
+}
