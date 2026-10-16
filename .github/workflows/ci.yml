@@ -13,5 +13,6 @@ jobs:
       - run: go test ./...
       - run: go vet ./...
       - run: ./scripts/package.sh
-      - run: tar -tzf dist/verso-plugin-jodu5174x-linux-arm64.tar.gz
+      - run: tar -tzf dist/verso-plugin-jodu-linux-arm64.tar.gz
+      - run: ./scripts/package.test.sh
       - run: sh -n scripts/build-apk.sh scripts/setup-feed.sh packaging/apk/*.sh

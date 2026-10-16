@@ -1,10 +1,10 @@
 {
-  "id":"jodu5174x",
+  "id":"jodu",
   "name":"5G ODU",
   "schema_version":1,
-  "socket":"/var/run/verso-plugin-jodu5174x/ui/jodu5174x.sock",
+  "socket":"/var/run/verso-plugin-jodu/ui/jodu.sock",
   "overview":{"path":"/overview","icon":"radio"},
   "nav":[{"section":"Network","label":"ODU stats","path":"/","icon":"radio"},{"section":"System","label":"ODU configuration","path":"/settings","icon":"settings"}],
-  "acl":{"read":[{"scope":"uci","object":"jodu5174x","function":"read"}],"write":[{"scope":"uci","object":"jodu5174x","function":"write"}]},
-  "secrets":["jodu5174x.password"]
+  "acl":{"read":[{"scope":"uci","object":"jodu","function":"read"}],"write":[{"scope":"uci","object":"jodu","function":"write"}]},
+  "secrets":["jodu.password"]
 }

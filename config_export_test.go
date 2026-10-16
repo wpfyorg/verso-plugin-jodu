@@ -37,7 +37,7 @@ func TestExportODUConfigPublishesPrivateOwnedSnapshotAndReplacesIt(t *testing.T)
 		t.Fatal("snapshot JSON field names are not stable")
 	}
 	cfg, err := readConfigSnapshot(path)
-	if err != nil || cfg.Host != "192.168.225.1" || cfg.Username != "Admin" || cfg.Password != "secret-one" || !cfg.Enabled {
+	if err != nil || cfg.Model != model5174x || cfg.Host != "192.168.225.1" || cfg.Username != "Admin" || cfg.Password != "secret-one" || !cfg.Enabled {
 		t.Fatal("snapshot did not round-trip")
 	}
 
@@ -74,12 +74,30 @@ func TestExportODUConfigFailureReplacesSnapshotWithInvalidState(t *testing.T) {
 	}
 }
 
+func TestReadConfigSnapshotMigratesLegacyModel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	legacy := []byte(`{"config":{"host":"192.168.225.1","username":"Admin","password":"secret","enabled":true},"valid":true,"timestamp":"` + time.Now().UTC().Format(time.RFC3339Nano) + `"}`)
+	if err := os.WriteFile(path, legacy, 0600); err != nil {
+		t.Fatal("cannot write legacy snapshot")
+	}
+
+	cfg, err := readConfigSnapshot(path)
+	if err != nil {
+		t.Fatalf("legacy snapshot rejected: %v", err)
+	}
+	if cfg.Model != model5174x || cfg.Host != "192.168.225.1" || cfg.Username != "Admin" || cfg.Password != "secret" || !cfg.Enabled {
+		t.Fatalf("legacy snapshot migration mismatch: %#v", cfg)
+	}
+}
+
 func TestReadConfigSnapshotRejectsMalformedOversizeAndStale(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	for name, contents := range map[string][]byte{
 		"malformed":       []byte(`{"valid":`),
 		"unknown field":   []byte(`{"valid":true,"timestamp":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","config":{"Host":"192.168.225.1","Username":"Admin","Password":"x","Enabled":true},"other":1}`),
 		"missing field":   []byte(`{"valid":true,"timestamp":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","config":{"host":"192.168.225.1","username":"Admin","enabled":true}}`),
+		"invalid model":   mustMarshalSnapshot(t, configSnapshot{Valid: true, Timestamp: time.Now().UTC(), Config: snapshotConfig{Model: "auto", Host: "192.168.225.1", Username: "Admin"}}),
+		"empty model":     mustMarshalSnapshot(t, configSnapshot{Valid: true, Timestamp: time.Now().UTC(), Config: snapshotConfig{Model: "", Host: "192.168.225.1", Username: "Admin"}}),
 		"oversize":        []byte(strings.Repeat("x", configSnapshotLimit+1)),
 		"invalid wrapper": mustMarshalSnapshot(t, configSnapshot{Valid: false, Timestamp: time.Now().UTC()}),
 		"stale":           mustMarshalSnapshot(t, configSnapshot{Valid: true, Timestamp: time.Now().Add(-configSnapshotMaxAge - time.Second), Config: snapshotConfig{Host: "192.168.225.1", Username: "Admin"}}),
@@ -99,11 +117,11 @@ func TestReadConfigSnapshotRejectsMalformedOversizeAndStale(t *testing.T) {
 func writeSnapshotUCI(t *testing.T, command, host, username, password, enabled string) {
 	t.Helper()
 	script := "#!/bin/sh\nfor last do :; done\ncase \"$last\" in\n" +
-		"jodu5174x.main) printf 'jodu5174x\\n';;\n" +
-		"jodu5174x.main.host) printf '" + host + "\\n';;\n" +
-		"jodu5174x.main.username) printf '" + username + "\\n';;\n" +
-		"jodu5174x.main.password) printf '" + password + "\\n';;\n" +
-		"jodu5174x.main.enabled) printf '" + enabled + "\\n';;\n*) exit 1;;\nesac\n"
+		"jodu.main) printf 'jodu\\n';;\n" +
+		"jodu.main.host) printf '" + host + "\\n';;\n" +
+		"jodu.main.username) printf '" + username + "\\n';;\n" +
+		"jodu.main.password) printf '" + password + "\\n';;\n" +
+		"jodu.main.enabled) printf '" + enabled + "\\n';;\n*) exit 1;;\nesac\n"
 	if err := os.WriteFile(command, []byte(script), 0700); err != nil {
 		t.Fatal("cannot write UCI fixture")
 	}

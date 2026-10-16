@@ -25,6 +25,7 @@ type configSnapshot struct {
 }
 
 type snapshotConfig struct {
+	Model    string `json:"model"`
 	Host     string `json:"host"`
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -37,7 +38,7 @@ func exportODUConfig(ctx context.Context, command, configDir, saveDir, snapshotP
 	cfg, loadErr := loadODUConfig(ctx, command, configDir, saveDir)
 	snapshot := configSnapshot{Valid: loadErr == nil, Timestamp: time.Now().UTC()}
 	if loadErr == nil {
-		snapshot.Config = snapshotConfig{Host: cfg.Host, Username: cfg.Username, Password: cfg.Password, Enabled: cfg.Enabled}
+		snapshot.Config = snapshotConfig{Model: cfg.Model, Host: cfg.Host, Username: cfg.Username, Password: cfg.Password, Enabled: cfg.Enabled}
 	}
 	if err := writeConfigSnapshot(snapshotPath, snapshot, uid, gid); err != nil {
 		return err
@@ -103,7 +104,15 @@ func readConfigSnapshot(path string) (oduConfig, error) {
 		return oduConfig{}, errConfigUnavailable
 	}
 	var configFields map[string]json.RawMessage
-	if json.Unmarshal(fields["config"], &configFields) != nil || !hasJSONFields(configFields, "host", "username", "password", "enabled") {
+	if json.Unmarshal(fields["config"], &configFields) != nil {
+		return oduConfig{}, errConfigUnavailable
+	}
+	// Old private snapshots predate explicit model selection and mean 5174x.
+	_, modelPresent := configFields["model"]
+	if !modelPresent {
+		configFields["model"] = json.RawMessage(`"jodu5174x"`)
+	}
+	if !hasJSONFields(configFields, "model", "host", "username", "password", "enabled") {
 		return oduConfig{}, errConfigUnavailable
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
@@ -112,6 +121,12 @@ func readConfigSnapshot(path string) (oduConfig, error) {
 	if err := decoder.Decode(&snapshot); err != nil {
 		return oduConfig{}, errConfigUnavailable
 	}
+	if snapshot.Config.Model == "" {
+		if modelPresent {
+			return oduConfig{}, errConfigUnavailable
+		}
+		snapshot.Config.Model = model5174x
+	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return oduConfig{}, errConfigUnavailable
@@ -119,12 +134,12 @@ func readConfigSnapshot(path string) (oduConfig, error) {
 	if !snapshot.Valid || snapshot.Timestamp.IsZero() ||
 		time.Since(snapshot.Timestamp) > configSnapshotMaxAge ||
 		snapshot.Timestamp.After(time.Now().Add(configSnapshotFuture)) ||
-		!validHost(snapshot.Config.Host) || snapshot.Config.Username == "" ||
+		!validModel(snapshot.Config.Model) || !validHost(snapshot.Config.Host) || snapshot.Config.Username == "" ||
 		len(snapshot.Config.Username) > 64 || len(snapshot.Config.Password) > 256 ||
 		strings.ContainsAny(snapshot.Config.Username, "\r\n") {
 		return oduConfig{}, errConfigUnavailable
 	}
-	return oduConfig{Host: snapshot.Config.Host, Username: snapshot.Config.Username, Password: snapshot.Config.Password, Enabled: snapshot.Config.Enabled}, nil
+	return oduConfig{Model: snapshot.Config.Model, Host: snapshot.Config.Host, Username: snapshot.Config.Username, Password: snapshot.Config.Password, Enabled: snapshot.Config.Enabled}, nil
 }
 
 func hasJSONFields(fields map[string]json.RawMessage, expected ...string) bool {

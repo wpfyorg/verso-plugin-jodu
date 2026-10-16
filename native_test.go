@@ -19,11 +19,11 @@ func TestNativeConfigLoadsWithoutRenderingCredentials(t *testing.T) {
 	script := `#!/bin/sh
 for last do :; done
 case "$last" in
-  jodu5174x.main) printf 'jodu5174x\n';;
-  jodu5174x.main.host) printf '192.168.225.1\n';;
-  jodu5174x.main.username) printf 'Admin\n';;
-  jodu5174x.main.password) printf 'test-secret\n';;
-  jodu5174x.main.enabled) printf '1\n';;
+  jodu.main) printf 'jodu\n';;
+  jodu.main.host) printf '192.168.225.1\n';;
+  jodu.main.username) printf 'Admin\n';;
+  jodu.main.password) printf 'test-secret\n';;
+  jodu.main.enabled) printf '1\n';;
   *) exit 1;;
 esac
 `
@@ -31,7 +31,7 @@ esac
 		t.Fatal(err)
 	}
 	cfg, err := loadODUConfig(context.Background(), command, t.TempDir(), t.TempDir())
-	if err != nil || cfg.Host != "192.168.225.1" || cfg.Username != "Admin" || cfg.Password != "test-secret" || !cfg.Enabled {
+	if err != nil || cfg.Model != model5174x || cfg.Host != "192.168.225.1" || cfg.Username != "Admin" || cfg.Password != "test-secret" || !cfg.Enabled {
 		t.Fatal("native config not loaded correctly")
 	}
 	_, out := request(t, &monitor{}, "GET", "/settings", "", configHeader(t))
@@ -101,11 +101,11 @@ func TestEmptyUCIPasswordIsValidDisabledConfiguration(t *testing.T) {
 	script := `#!/bin/sh
 for last do :; done
 case "$last" in
-jodu5174x.main) echo jodu5174x;;
-jodu5174x.main.host) echo 192.168.225.1;;
-jodu5174x.main.username) echo Admin;;
-jodu5174x.main.enabled) echo 0;;
-jodu5174x.main.password) exit 1;;
+jodu.main) echo jodu;;
+jodu.main.host) echo 192.168.225.1;;
+jodu.main.username) echo Admin;;
+jodu.main.enabled) echo 0;;
+jodu.main.password) exit 1;;
 *) exit 1;;
 esac
 `
@@ -196,7 +196,7 @@ func TestRebootReturnsBeforeHardwareOperationCompletes(t *testing.T) {
 		t.Fatal("pending outcome missing")
 	}
 	m.poll()
-	if m.startReboot("192.168.225.1") {
+	if m.startReboot("192.168.225.1", model5174x) {
 		close(finish)
 		t.Fatal("queued duplicate reboot")
 	}
@@ -288,7 +288,7 @@ func TestInFlightPollCannotRestorePreRebootTelemetry(t *testing.T) {
 	}, reboot: func(context.Context, string) error { return nil }}
 	go func() { m.poll(); close(done) }()
 	<-started
-	if !m.startReboot("192.168.225.1") {
+	if !m.startReboot("192.168.225.1", model5174x) {
 		close(finish)
 		t.Fatal("reboot job did not start")
 	}
