@@ -38,21 +38,21 @@ else
       echo 'Could not prepare JODU config migration.' >&2
       exit 1
     fi
-    if ! uci -q -c "$work" -P "$work" set jodu.main.model=jodu5174x; then
+    if ! uci -q -c "$work" set jodu.main.model=jodu5174x; then
       rm -rf "$work" "$tmp"
       echo 'Could not prepare JODU config migration.' >&2
       exit 1
     fi
     for option in host username password enabled; do
-      if value="$(uci -q -c /etc/config -P "$work" get "jodu5174x.main.$option" 2>/dev/null)"; then
-        if ! uci -q -c "$work" -P "$work" set "jodu.main.$option=$value"; then
+      if value="$(uci -q -c /etc/config get "jodu5174x.main.$option" 2>/dev/null)"; then
+        if ! uci -q -c "$work" set "jodu.main.$option=$value"; then
           rm -rf "$work" "$tmp"
           echo 'Could not migrate JODU config.' >&2
           exit 1
         fi
       fi
     done
-    if ! uci -q -c "$work" -P "$work" commit jodu || ! cp "$work/jodu" "$tmp"; then
+    if ! uci -q -c "$work" commit jodu || ! cp "$work/jodu" "$tmp"; then
       rm -rf "$work" "$tmp"
       echo 'Could not migrate JODU config.' >&2
       exit 1

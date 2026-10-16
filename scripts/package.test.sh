@@ -48,8 +48,11 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     -q) shift ;;
     -c) configdir="$2"; shift 2 ;;
-    -P) shift 2 ;;
     get)
+      if [ "$configdir" != /etc/config ]; then
+        echo 'Legacy UCI read used the wrong config directory.' >&2
+        exit 1
+      fi
       option="${2##*.}"
       case "$option" in
         host) printf '%s\n' '192.0.2.1' ;;
