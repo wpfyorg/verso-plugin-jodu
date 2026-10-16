@@ -108,7 +108,8 @@ func readConfigSnapshot(path string) (oduConfig, error) {
 		return oduConfig{}, errConfigUnavailable
 	}
 	// Old private snapshots predate explicit model selection and mean 5174x.
-	if _, ok := configFields["model"]; !ok {
+	_, modelPresent := configFields["model"]
+	if !modelPresent {
 		configFields["model"] = json.RawMessage(`"jodu5174x"`)
 	}
 	if !hasJSONFields(configFields, "model", "host", "username", "password", "enabled") {
@@ -121,7 +122,7 @@ func readConfigSnapshot(path string) (oduConfig, error) {
 		return oduConfig{}, errConfigUnavailable
 	}
 	if snapshot.Config.Model == "" {
-		if _, exists := configFields["model"]; exists {
+		if modelPresent {
 			return oduConfig{}, errConfigUnavailable
 		}
 		snapshot.Config.Model = model5174x

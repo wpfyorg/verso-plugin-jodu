@@ -297,7 +297,8 @@ type statusProvider struct {
 
 func newStatusProvider() *statusProvider {
 	dialer := &net.Dialer{Timeout: oduRequestTimeout}
-	return &statusProvider{client: &http.Client{Timeout: oduRequestTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, dialContext: dialer.DialContext}
+	transport := &http.Transport{Proxy: nil, MaxResponseHeaderBytes: oduResponseLimit}
+	return &statusProvider{client: &http.Client{Timeout: oduRequestTimeout, Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, dialContext: dialer.DialContext}
 }
 
 func (p *statusProvider) Reboot(ctx context.Context, cfg oduConfig) error {

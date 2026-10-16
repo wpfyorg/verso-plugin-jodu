@@ -74,6 +74,22 @@ func TestExportODUConfigFailureReplacesSnapshotWithInvalidState(t *testing.T) {
 	}
 }
 
+func TestReadConfigSnapshotMigratesLegacyModel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	legacy := []byte(`{"config":{"host":"192.168.225.1","username":"Admin","password":"secret","enabled":true},"valid":true,"timestamp":"` + time.Now().UTC().Format(time.RFC3339Nano) + `"}`)
+	if err := os.WriteFile(path, legacy, 0600); err != nil {
+		t.Fatal("cannot write legacy snapshot")
+	}
+
+	cfg, err := readConfigSnapshot(path)
+	if err != nil {
+		t.Fatalf("legacy snapshot rejected: %v", err)
+	}
+	if cfg.Model != model5174x || cfg.Host != "192.168.225.1" || cfg.Username != "Admin" || cfg.Password != "secret" || !cfg.Enabled {
+		t.Fatalf("legacy snapshot migration mismatch: %#v", cfg)
+	}
+}
+
 func TestReadConfigSnapshotRejectsMalformedOversizeAndStale(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	for name, contents := range map[string][]byte{
