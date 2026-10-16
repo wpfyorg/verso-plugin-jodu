@@ -302,8 +302,20 @@ func newStatusProvider() *statusProvider {
 }
 
 func (p *statusProvider) Reboot(ctx context.Context, cfg oduConfig) error {
+	conn, cleanup, err := p.openTelnet(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if _, err = io.WriteString(conn, "reboot\r\n"); err != nil {
+		return errODUUnavailable
+	}
+	return errRebootUnconfirmed
+}
+
+func (p *statusProvider) openTelnet(ctx context.Context, cfg oduConfig) (net.Conn, func(), error) {
 	if !validHost(cfg.Host) || cfg.Username == "" || cfg.Password == "" || len(cfg.Username) > 64 || len(cfg.Password) > 256 || strings.ContainsAny(cfg.Username+cfg.Password, "\r\n") {
-		return errors.New("invalid ODU configuration")
+		return nil, nil, errors.New("invalid ODU configuration")
 	}
 	dial := p.dialContext
 	if dial == nil {
@@ -311,35 +323,42 @@ func (p *statusProvider) Reboot(ctx context.Context, cfg oduConfig) error {
 	}
 	conn, err := dial(ctx, "tcp", net.JoinHostPort(cfg.Host, "23"))
 	if err != nil {
-		return sanitizedReadError(ctx, err)
+		return nil, nil, sanitizedReadError(ctx, err)
 	}
-	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
-	defer stop()
+	cleanup := func() {
+		stop()
+		_ = conn.Close()
+	}
 	deadline := time.Now().Add(8 * time.Second)
 	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
 		deadline = ctxDeadline
 	}
-	_ = conn.SetDeadline(deadline)
+	if err := conn.SetDeadline(deadline); err != nil {
+		cleanup()
+		return nil, nil, errODUUnavailable
+	}
 	if _, err = readTelnetPrompt(conn, "login:", "username:"); err != nil {
-		return errODUUnavailable
+		cleanup()
+		return nil, nil, errODUUnavailable
 	}
 	if _, err = io.WriteString(conn, cfg.Username+"\r\n"); err != nil {
-		return errODUUnavailable
+		cleanup()
+		return nil, nil, errODUUnavailable
 	}
 	if _, err = readTelnetPrompt(conn, "password:"); err != nil {
-		return errODUUnavailable
+		cleanup()
+		return nil, nil, errODUUnavailable
 	}
 	if _, err = io.WriteString(conn, cfg.Password+"\r\n"); err != nil {
-		return errODUUnavailable
+		cleanup()
+		return nil, nil, errODUUnavailable
 	}
 	if _, err = readTelnetPrompt(conn, "#", "$", "> "); err != nil {
-		return errODUUnavailable
+		cleanup()
+		return nil, nil, errODUUnavailable
 	}
-	if _, err = io.WriteString(conn, "reboot\r\n"); err != nil {
-		return errODUUnavailable
-	}
-	return errRebootUnconfirmed
+	return conn, cleanup, nil
 }
 
 func readTelnetPrompt(conn net.Conn, prompts ...string) (string, error) {
@@ -359,8 +378,8 @@ func readTelnetPrompt(conn net.Conn, prompts ...string) (string, error) {
 		out.WriteByte(buf[0])
 		text := strings.ToLower(out.String())
 		for _, prompt := range prompts {
-			if strings.Contains(text, strings.ToLower(prompt)) {
-				return text, nil
+			if strings.HasSuffix(strings.TrimSpace(text), strings.TrimSpace(strings.ToLower(prompt))) {
+				return out.String(), nil
 			}
 		}
 	}
@@ -378,6 +397,9 @@ func (p *statusProvider) endpoint(cfg oduConfig) (string, error) {
 }
 
 func (p *statusProvider) Read(ctx context.Context, cfg oduConfig) (reading, error) {
+	if !cfg.Enabled {
+		return reading{}, errMonitoringDisabled
+	}
 	endpoint, err := p.endpoint(cfg)
 	if err != nil {
 		return reading{}, err
@@ -387,22 +409,153 @@ func (p *statusProvider) Read(ctx context.Context, cfg oduConfig) (reading, erro
 		return reading{}, err
 	}
 	resp, err := p.client.Do(req)
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			raw, readErr := io.ReadAll(io.LimitReader(resp.Body, oduResponseLimit+1))
+			if readErr == nil && len(raw) <= oduResponseLimit {
+				netData, data := parse52140Status(raw)
+				if len(netData) > 0 {
+					return reading{Net: netData, Data: data}, nil
+				}
+			}
+		}
+	}
+	return p.readTelnetStatus(ctx, cfg)
+}
+
+var jodu52140ReadCommands = [...]string{
+	`ubus call luxslam 5g '{"cmd":"get","class":"serving_cell"}'`,
+	`ubus call luxslam 5g '{"cmd":"get","class":"secondary_cell"}'`,
+	`ubus call luxslam 5g '{"cmd":"get","class":"network"}'`,
+}
+
+func (p *statusProvider) readTelnetStatus(ctx context.Context, cfg oduConfig) (reading, error) {
+	conn, cleanup, err := p.openTelnet(ctx, cfg)
 	if err != nil {
-		return reading{}, sanitizedReadError(ctx, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return reading{}, errSetupRequired
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, oduResponseLimit+1))
-	if err != nil || len(raw) > oduResponseLimit {
 		return reading{}, errODUUnavailable
 	}
-	netData, data := parse52140Status(raw)
-	if len(netData) == 0 {
-		return reading{}, errSetupRequired
+	defer cleanup()
+	objects := make([]map[string]string, 0, len(jodu52140ReadCommands))
+	for _, command := range jodu52140ReadCommands {
+		output, err := run52140ReadCommand(conn, command)
+		if err != nil {
+			return reading{}, errODUUnavailable
+		}
+		object, err := parse52140UbusObject(output)
+		if err != nil {
+			return reading{}, errODUUnavailable
+		}
+		objects = append(objects, object)
+	}
+	netData, data := normalize52140Objects(objects[0], objects[1], objects[2])
+	if len(netData) == 0 || (netData["rsrp"] == nil && netData["rsrq"] == nil && netData["sinr"] == nil) {
+		return reading{}, errODUUnavailable
 	}
 	return reading{Net: netData, Data: data}, nil
+}
+
+func run52140ReadCommand(conn net.Conn, command string) (string, error) {
+	allowed := false
+	for _, candidate := range jodu52140ReadCommands {
+		if command == candidate {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return "", errors.New("unsupported status command")
+	}
+	if _, err := io.WriteString(conn, command+"\r\n"); err != nil {
+		return "", err
+	}
+	output, err := readTelnetPrompt(conn, "#", "$", "> ")
+	if err != nil {
+		return "", err
+	}
+	if echo := strings.Index(output, command); echo >= 0 {
+		end := echo + len(command)
+		for end < len(output) && (output[end] == '\r' || output[end] == '\n') {
+			end++
+		}
+		output = output[end:]
+	}
+	return output, nil
+}
+
+func parse52140UbusObject(output string) (map[string]string, error) {
+	start := strings.IndexByte(output, '{')
+	if start < 0 {
+		return nil, errors.New("missing status JSON")
+	}
+	depth, end := 0, -1
+	inString, escaped := false, false
+	for i := start; i < len(output); i++ {
+		c := output[i]
+		if inString {
+			if escaped {
+				escaped = false
+			} else if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				end = i + 1
+				i = len(output)
+			}
+		}
+	}
+	if end < 0 {
+		return nil, errors.New("incomplete status JSON")
+	}
+	var values map[string]any
+	if err := json.Unmarshal([]byte(output[start:end]), &values); err != nil || values == nil {
+		return nil, errors.New("invalid status JSON")
+	}
+	for _, key := range []string{"data", "result", "values"} {
+		if nested, ok := values[key].(map[string]any); ok {
+			values = nested
+			break
+		}
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		if value != nil {
+			out[strings.ToLower(key)] = fmt.Sprint(value)
+		}
+	}
+	return out, nil
+}
+
+func normalize52140Objects(serving, secondary, network map[string]string) (map[string]any, map[string]any) {
+	netData := map[string]any{}
+	putAlias(netData, serving, map[string]string{
+		"status": "operation_mode", "operating_mode": "operation_mode", "rrc_state": "rrc_state",
+		"nr5g": "band", "band": "band", "bandwidth": "band_width", "band_width": "band_width",
+		"nr_arfcn": "arfcn", "nr_earcn": "arfcn", "arfcn": "arfcn", "pci": "pcid", "physical_cell_id": "pcid",
+		"plmn": "plmn", "bler": "bler_dl", "dl_bler": "bler_dl", "mimo": "mimo", "modulation": "modulation",
+		"cqi": "cqi", "rsrp": "rsrp", "ss_rsrp": "rsrp", "rsrq": "rsrq", "ss_rsrq": "rsrq", "sinr": "sinr", "ss_sinr": "sinr",
+	})
+	putAlias(netData, secondary, map[string]string{
+		"nr5g": "band_sec", "band": "band_sec", "bandwidth": "band_width_sec", "band_width": "band_width_sec",
+		"nr_arfcn": "arfcn_sec", "nr_earcn": "arfcn_sec", "arfcn": "arfcn_sec", "pci": "pcid_sec", "physical_cell_id": "pcid_sec",
+		"plmn": "plmn_sec", "bler": "bler_dl_sec", "dl_bler": "bler_dl_sec", "mimo": "mimo_sec", "modulation": "modulation_sec",
+		"cqi": "cqi_sec", "rsrp": "rsrp_sec", "ss_rsrp": "rsrp_sec", "rsrq": "rsrq_sec", "ss_rsrq": "rsrq_sec", "sinr": "sinr_sec", "ss_sinr": "sinr_sec",
+	})
+	putAlias(netData, network, map[string]string{"status": "sim_card_state", "connection": "sim_card_state"})
+	data := map[string]any{}
+	putAlias(data, network, map[string]string{"rx_bytes": "downData", "tx_bytes": "upData"})
+	return netData, data
 }
 
 func parse52140Status(raw []byte) (map[string]any, map[string]any) {
@@ -449,12 +602,8 @@ func parse52140Status(raw []byte) (map[string]any, map[string]any) {
 		}
 		return out
 	}
-	serving, secondary := decode("SERVING"), decode("SECONDARY")
-	netData := map[string]any{}
-	putAlias(netData, serving, map[string]string{"status": "operation_mode", "nr5g": "band", "bandwidth": "band_width", "nr_arfcn": "arfcn", "pci": "pcid", "plmn": "plmn", "bler": "bler_dl", "mimo": "mimo", "modulation": "modulation", "rsrp": "rsrp", "rsrq": "rsrq", "sinr": "sinr"})
-	putAlias(netData, secondary, map[string]string{"band": "band_sec", "bandwidth": "band_width_sec", "nr_arfcn": "arfcn_sec", "pci": "pcid_sec", "bler": "bler_dl_sec", "mimo": "mimo_sec", "modulation": "modulation_sec", "ss_rsrp": "rsrp_sec", "ss_rsrq": "rsrq_sec", "ss_sinr": "sinr_sec"})
-	network := decode("NETWORK")
-	putAlias(netData, network, map[string]string{"status": "sim_card_state", "connection": "sim_card_state"})
+	serving, secondary, network := decode("SERVING"), decode("SECONDARY"), decode("NETWORK")
+	netData, data := normalize52140Objects(serving, secondary, network)
 	eth := decode("ETH")
 	putAlias(netData, eth, map[string]string{"link_status": "link_status", "speed": "eth_speed", "duplex": "eth_duplex", "duplex_mode": "eth_duplex"})
 	if len(sections["CPU"]) > 0 {
@@ -479,8 +628,6 @@ func parse52140Status(raw []byte) (map[string]any, map[string]any) {
 	if len(sections["VERSION"]) > 0 {
 		netData["softversion"] = strings.TrimSpace(strings.Join(sections["VERSION"], " "))
 	}
-	data := map[string]any{}
-	putAlias(data, network, map[string]string{"rx_bytes": "downData", "tx_bytes": "upData"})
 	if serving == nil || len(serving) == 0 || len(sections["UPTIME"]) == 0 || !strings.Contains(strings.Join(sections["VERSION"], " "), "1.2.1") {
 		return nil, nil
 	}

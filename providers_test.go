@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -109,19 +110,110 @@ cpuss-0-usr, 48
 	}
 }
 
-func TestJODU52140MissingHelperVersionRequiresSetup(t *testing.T) {
+func TestJODU52140HelperFastPathAvoidsTelnet(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/status.txt" {
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
-		_, _ = w.Write([]byte("---SERVING---\n{}\n"))
+		_, _ = io.WriteString(w, "---SERVING---\n{\"status\":\"CONNECTED\",\"nr5g\":\"n78\",\"rsrp\":-80}\n---UPTIME---\n1\n---VERSION---\n1.2.1\n")
 	}))
 	defer server.Close()
 	p := newStatusProvider()
 	p.base = server.URL
-	_, err := p.Read(context.Background(), oduConfig{Model: model52140, Host: "192.168.225.1", Enabled: true})
-	if err != errSetupRequired {
-		t.Fatalf("missing helper version returned %v", err)
+	p.dialContext = func(context.Context, string, string) (net.Conn, error) {
+		t.Fatal("valid HTTP helper should avoid Telnet")
+		return nil, errors.New("unexpected Telnet dial")
+	}
+	got, err := p.Read(context.Background(), oduConfig{Model: model52140, Host: "192.168.225.1", Enabled: true})
+	if err != nil || got.Net["rsrp"] != "-80" {
+		t.Fatalf("helper fast path result %#v, error %v", got, err)
+	}
+}
+
+func TestJODU52140FallsBackToReadOnlyTelnetTranscript(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "missing helper", http.StatusNotFound)
+	}))
+	defer server.Close()
+	clientSide, deviceSide := net.Pipe()
+	p := newStatusProvider()
+	p.base = server.URL
+	p.dialContext = func(context.Context, string, string) (net.Conn, error) { return clientSide, nil }
+	gotCommands := make(chan []string, 1)
+	go func() {
+		defer deviceSide.Close()
+		reader := bufio.NewReader(deviceSide)
+		commands := []string{}
+		_, _ = io.WriteString(deviceSide, "login:")
+		username, _ := reader.ReadString('\n')
+		_, _ = io.WriteString(deviceSide, "Password:")
+		password, _ := reader.ReadString('\n')
+		if strings.TrimSpace(username) != "Admin" || strings.TrimSpace(password) != "secret" {
+			gotCommands <- []string{"bad credentials"}
+			return
+		}
+		_, _ = io.WriteString(deviceSide, "#")
+		responses := []string{
+			`{"status":"CONNECTED","nr5g":"n78","bandwidth":100,"pci":263,"nr_arfcn":634080,"rsrp":-80,"rsrq":-10,"sinr":18,"plmn":"00101"}`,
+			`{"band":"n41","bandwidth":40,"pci":264,"nr_arfcn":640000,"ss_rsrp":-83,"ss_rsrq":-11,"ss_sinr":15}`,
+			`{"rx_bytes":123456,"tx_bytes":654321}`,
+		}
+		for i, response := range responses {
+			command, _ := reader.ReadString('\n')
+			commands = append(commands, strings.TrimSpace(command))
+			_, _ = io.WriteString(deviceSide, strings.TrimSpace(command)+"\r\n"+response+"\r\n#")
+			if i == len(responses)-1 {
+				gotCommands <- commands
+			}
+		}
+	}()
+	cfg := oduConfig{Model: model52140, Host: "192.168.225.1", Username: "Admin", Password: "secret", Enabled: true}
+	got, err := p.Read(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("fallback read failed: %v", err)
+	}
+	commands := <-gotCommands
+	if len(commands) != len(jodu52140ReadCommands) {
+		t.Fatalf("commands sent %#v", commands)
+	}
+	for i, command := range jodu52140ReadCommands {
+		if commands[i] != command {
+			t.Errorf("command %d = %q, want exact read-only command %q", i, commands[i], command)
+		}
+	}
+	for key, want := range map[string]any{"operation_mode": "CONNECTED", "band": "n78", "rsrp": "-80", "band_sec": "n41", "rsrp_sec": "-83"} {
+		if got.Net[key] != want {
+			t.Errorf("normalized %s=%v, want %v", key, got.Net[key], want)
+		}
+	}
+	if got.Data["downData"] != "123456" || got.Data["upData"] != "654321" {
+		t.Fatalf("traffic counters not normalized: %#v", got.Data)
+	}
+}
+
+func TestJODU52140FallbackFailureIsUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "---SERVING---\n{}\n---VERSION---\n0.9\n")
+	}))
+	defer server.Close()
+	p := newStatusProvider()
+	p.base = server.URL
+	p.dialContext = func(context.Context, string, string) (net.Conn, error) { return nil, errors.New("offline") }
+	_, err := p.Read(context.Background(), oduConfig{Model: model52140, Host: "192.168.225.1", Username: "Admin", Password: "secret", Enabled: true})
+	if !errors.Is(err, errODUUnavailable) {
+		t.Fatalf("failed helper and Telnet should report unavailable, got %v", err)
+	}
+}
+
+func TestJODU52140DisabledReadDoesNotUseNetwork(t *testing.T) {
+	p := newStatusProvider()
+	p.client = nil
+	p.dialContext = func(context.Context, string, string) (net.Conn, error) {
+		t.Fatal("disabled monitor attempted Telnet")
+		return nil, errors.New("unexpected dial")
+	}
+	if _, err := p.Read(context.Background(), oduConfig{Model: model52140, Host: "192.168.225.1", Enabled: false}); !errors.Is(err, errMonitoringDisabled) {
+		t.Fatalf("disabled read error = %v", err)
 	}
 }
 
