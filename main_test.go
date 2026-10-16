@@ -15,8 +15,8 @@ import (
 
 func configHeader(t *testing.T) string {
 	t.Helper()
-	data := map[string]any{"jodu5174x": map[string]any{"main": map[string]any{
-		".type": "jodu5174x", "host": "192.168.225.1", "username": "Admin", "enabled": "1", "password": "never-return-this",
+	data := map[string]any{"jodu": map[string]any{"main": map[string]any{
+		".type": "jodu", "host": "192.168.225.1", "username": "Admin", "enabled": "1", "password": "never-return-this",
 	}}}
 	raw, err := json.Marshal(data)
 	if err != nil {
@@ -65,7 +65,7 @@ func TestStatusRequiresScopedRead(t *testing.T) {
 
 func TestSettingsStagesOnlyChangedValues(t *testing.T) {
 	m := &monitor{}
-	form := url.Values{"host": {"192.168.225.1"}, "username": {"Admin"}, "enabled": {"1"}}
+	form := url.Values{"model": {model5174x}, "host": {"192.168.225.1"}, "username": {"Admin"}, "enabled": {"1"}}
 	code, out := request(t, m, "POST", "/settings", form.Encode(), configHeader(t))
 	if code != 200 {
 		t.Fatal(code)
@@ -95,7 +95,7 @@ func TestSettingsStagesOnlyChangedValues(t *testing.T) {
 
 func TestSettingsRejectsHostInjection(t *testing.T) {
 	m := &monitor{}
-	form := url.Values{"host": {"example.com/path"}, "username": {"Admin"}, "enabled": {"1"}}
+	form := url.Values{"model": {model5174x}, "host": {"example.com/path"}, "username": {"Admin"}, "enabled": {"1"}}
 	code, _ := request(t, m, "POST", "/settings", form.Encode(), configHeader(t))
 	if code != http.StatusUnprocessableEntity {
 		t.Fatalf("wanted 422, got %d", code)
@@ -119,7 +119,7 @@ func TestPollClearsOldReadingsOnFailure(t *testing.T) {
 func TestOverviewRequiresScopedRead(t *testing.T) {
 	m := &monitor{value: reading{Net: map[string]any{"rsrp": "-75", "password": "hidden"}},
 		updated: time.Now(), checked: time.Now()}
-	for _, header := range []string{"", "not-base64", base64.StdEncoding.EncodeToString([]byte(`{"jodu5174x":{}}`))} {
+	for _, header := range []string{"", "not-base64", base64.StdEncoding.EncodeToString([]byte(`{"jodu":{}}`))} {
 		code, out := request(t, m, "GET", "/overview", "", header)
 		encoded, _ := json.Marshal(out)
 		if code != http.StatusOK || !strings.Contains(string(encoded), "Status unavailable") ||

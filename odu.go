@@ -27,9 +27,17 @@ var (
 const (
 	oduRequestTimeout = 8 * time.Second
 	oduResponseLimit  = 64 << 10
+	model5174x        = "jodu5174x"
+	model5164x        = "jodu5164x"
+	model52140        = "jodu52140"
 )
 
+func validModel(model string) bool {
+	return model == model5174x || model == model5164x || model == model52140
+}
+
 type oduConfig struct {
+	Model                    string
 	Host, Username, Password string
 	Enabled                  bool
 }

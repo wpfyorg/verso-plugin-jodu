@@ -1,4 +1,4 @@
-// Native Verso configuration and monitoring for JODU5174x outdoor units.
+// Native Verso configuration and monitoring for JODU outdoor units.
 package main
 
 import (
@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const defaultSocket = "/var/run/verso-plugin-jodu5174x/ui/jodu5174x.sock"
+const defaultSocket = "/var/run/verso-plugin-jodu/ui/jodu.sock"
 
 type reading struct {
 	Net  map[string]any `json:"netstatus"`
@@ -36,6 +36,7 @@ type monitor struct {
 	err                        string
 	fetch                      func(context.Context) (reading, error)
 	reboot                     func(context.Context, string) error
+	rebootForModel             func(context.Context, string, string) error
 	confirmations              map[string]rebootConfirmation
 	generation                 uint64
 	rebooting                  bool
@@ -68,6 +69,8 @@ func (m *monitor) poll() {
 			reason = "Set the ODU password in Settings."
 		case errors.Is(err, errODULogin):
 			reason = "ODU sign-in failed. Check Settings."
+		case errors.Is(err, errSetupRequired):
+			reason = "JODU52140 needs its ODU status helper on HTTP port 8080 (wire format version 1.2.1). Complete the ODU-side setup before monitoring."
 		default:
 			reason = "Unable to read ODU status. Check its address and connection."
 		}
@@ -138,7 +141,7 @@ func metrics(v map[string]any, secondary bool) []any {
 	x := section(v, "Band", "band"+suffix, "Bandwidth (MHz)", "band_width"+suffix,
 		"ARFCN", "arfcn"+suffix, "Cell ID", "pcid"+suffix,
 		"Modulation", "modulation"+suffix, "MIMO", "mimo"+suffix,
-		"RSRP (dBm)", "rsrp"+suffix, "RSRQ (dB)", "rsrq"+suffix)
+		"CQI", "cqi"+suffix, "RSRP (dBm)", "rsrp"+suffix, "RSRQ (dB)", "rsrq"+suffix)
 	if !secondary {
 		x = append(x, section(v, "SINR (dB)", "sinr")...)
 	}
@@ -167,7 +170,9 @@ func (m *monitor) status(current map[string]string) map[string]any {
 	}
 	if reason == "" {
 		summary := section(v.Net, "Connection", "sim_card_state", "Radio", "operation_mode",
-			"RRC", "rrc_state", "Connected for", "connection_time", "ODU firmware", "softversion")
+			"RRC", "rrc_state", "Connected for", "connection_time", "ODU uptime", "odu_uptime", "ODU firmware", "softversion",
+			"ODU CPU", "odu_cpu_pct", "ODU memory", "odu_mem_pct", "ODU temperature", "temperature",
+			"ODU Ethernet", "link_status", "ODU Ethernet speed", "eth_speed", "ODU Ethernet duplex", "eth_duplex")
 		if v.Link != "" {
 			summary = append(summary, prop("Ethernet", strings.TrimSpace(v.Link)))
 		}
@@ -183,7 +188,7 @@ func (m *monitor) status(current map[string]string) map[string]any {
 		if len(secondary) > 0 {
 			children = append(children, box("Secondary carrier", secondary))
 		}
-		usage := section(v.Data, "Downloaded", "downData", "Uploaded", "upData")
+		usage := section(v.Data, "Downloaded", "downData", "Uploaded", "upData", "Packet loss", "packet_loss")
 		if len(usage) > 0 {
 			children = append(children, box("ODU traffic counters", usage))
 		}
@@ -192,10 +197,12 @@ func (m *monitor) status(current map[string]string) map[string]any {
 		map[string]any{"type": "field", "kind": "hidden", "name": "_action", "value": "monitor"},
 		map[string]any{"type": "switch", "name": "enabled", "label": "Monitor the ODU", "on": current["enabled"] == "1"},
 	}})
-	children = append(children, map[string]any{"type": "link", "label": "Settings", "href": "/plugins/jodu5174x/settings", "icon": "settings", "style": "button"})
-	children = append(children, map[string]any{"type": "link", "label": "Reboot ODU", "href": "/plugins/jodu5174x/reboot", "icon": "refresh-cw"})
+	children = append(children, map[string]any{"type": "link", "label": "Settings", "href": "/plugins/jodu/settings", "icon": "settings", "style": "button"})
+	if supportsReboot(current["model"]) {
+		children = append(children, map[string]any{"type": "link", "label": "Reboot ODU", "href": "/plugins/jodu/reboot", "icon": "refresh-cw"})
+	}
 	out := envelope("5G ODU", map[string]any{"type": "stack", "children": children})
-	out["act"] = map[string]any{"label": "Refresh", "href": "/plugins/jodu5174x/", "icon": "refresh-cw"}
+	out["act"] = map[string]any{"label": "Refresh", "href": "/plugins/jodu/", "icon": "refresh-cw"}
 	return out
 }
 
@@ -230,18 +237,35 @@ func snapshot(r *http.Request) (map[string]string, bool) {
 	if json.Unmarshal(payload, &configs) != nil {
 		return nil, false
 	}
-	main, ok := configs["jodu5174x"]["main"]
-	if !ok || main[".type"] != "jodu5174x" {
+	main, ok := configs["jodu"]["main"]
+	if !ok || main[".type"] != "jodu" {
 		return nil, false
 	}
 	fields := map[string]string{}
 	for _, key := range []string{"host", "username", "enabled"} {
 		fields[key], _ = main[key].(string)
 	}
+	if raw, exists := main["model"]; exists {
+		model, ok := raw.(string)
+		if !ok {
+			return nil, false
+		}
+		fields["model"] = model
+	} else {
+		fields["model"] = model5174x
+	}
+	if !validModel(fields["model"]) {
+		return nil, false
+	}
 	return fields, true
 }
 func fields(current map[string]string) []any {
 	return []any{
+		map[string]any{"type": "field", "kind": "select", "name": "model", "label": "ODU model", "value": current["model"], "options": []any{
+			map[string]any{"label": "JODU5174x", "value": model5174x},
+			map[string]any{"label": "JODU5164x", "value": model5164x},
+			map[string]any{"label": "JODU52140", "value": model52140},
+		}},
 		map[string]any{"type": "field", "kind": "text", "name": "host", "label": "ODU address", "value": current["host"], "placeholder": "192.168.225.1"},
 		map[string]any{"type": "field", "kind": "text", "name": "username", "label": "ODU username", "value": current["username"]},
 		map[string]any{"type": "field", "kind": "password", "name": "password", "label": "New password", "value": "", "help": "Leave empty to retain the saved password."},
@@ -255,7 +279,7 @@ func settings(current map[string]string, ok bool, reason string) map[string]any 
 	} else {
 		children = append(children, map[string]any{"type": "form", "style": "page", "submit": "Stage settings", "fields": fields(current)})
 	}
-	children = append(children, map[string]any{"type": "link", "label": "Back to ODU", "href": "/plugins/jodu5174x/"})
+	children = append(children, map[string]any{"type": "link", "label": "Back to ODU", "href": "/plugins/jodu/"})
 	out := envelope("5G ODU settings", map[string]any{"type": "stack", "children": children})
 	if reason != "" {
 		out["notice"] = map[string]any{"level": "warning", "text": reason}
@@ -337,7 +361,7 @@ func (m *monitor) handler(w http.ResponseWriter, r *http.Request) {
 			next = "1"
 		}
 		if next != current["enabled"] {
-			output["commit"] = []any{map[string]any{"config": "jodu5174x", "section": "main", "values": map[string]string{"enabled": next}}}
+			output["commit"] = []any{map[string]any{"config": "jodu", "section": "main", "values": map[string]string{"enabled": next}}}
 			output["notice"] = map[string]any{"level": "info", "text": "Monitoring change staged. Apply it from Verso's top bar."}
 		}
 	case "/reboot":
@@ -372,13 +396,14 @@ func (m *monitor) handler(w http.ResponseWriter, r *http.Request) {
 		if r.PostForm.Get("enabled") == "1" {
 			enable = "1"
 		}
-		if !validHost(host) || usr == "" || len(usr) > 64 || len(pass) > 256 || strings.ContainsAny(usr, "\r\n") {
-			output = settings(values, true, "Check the ODU address, username and password.")
+		model := r.PostForm.Get("model")
+		if !validModel(model) || !validHost(host) || usr == "" || len(usr) > 64 || len(pass) > 256 || strings.ContainsAny(usr, "\r\n") {
+			output = settings(values, true, "Check the ODU model, address, username and password.")
 			w.WriteHeader(http.StatusUnprocessableEntity)
 			break
 		}
 		changes := map[string]any{}
-		for key, next := range map[string]string{"host": host, "username": usr, "enabled": enable} {
+		for key, next := range map[string]string{"model": model, "host": host, "username": usr, "enabled": enable} {
 			if values[key] != next {
 				changes[key] = next
 			}
@@ -388,7 +413,7 @@ func (m *monitor) handler(w http.ResponseWriter, r *http.Request) {
 		}
 		output = settings(values, true, "")
 		if len(changes) > 0 {
-			output["commit"] = []any{map[string]any{"config": "jodu5174x", "section": "main", "values": changes}}
+			output["commit"] = []any{map[string]any{"config": "jodu", "section": "main", "values": changes}}
 			output["notice"] = map[string]any{"level": "info", "text": "Changes staged. Apply them from Verso's top bar."}
 		}
 	default:
@@ -403,7 +428,7 @@ func main() {
 	exportFile := flag.String("export-config", "", "Publish committed configuration without serving HTTP")
 	flag.Parse()
 	if *exportFile != "" {
-		account, err := user.Lookup("verso-plugin-jodu5174x")
+		account, err := user.Lookup("verso-plugin-jodu")
 		if err != nil {
 			log.Fatal("plugin account unavailable")
 		}
@@ -454,23 +479,23 @@ func main() {
 		}
 		return loadODUConfig(ctx, "/sbin/uci", "/etc/config", configDir)
 	}
-	client := newODUClient()
+	providers := newProviderSet()
 	m := &monitor{
 		fetch: func(ctx context.Context) (reading, error) {
 			cfg, err := loadConfig(ctx)
 			if err != nil {
 				return reading{}, err
 			}
-			value, err := client.Read(ctx, cfg)
+			value, err := providers.Read(ctx, cfg)
 			value.Link = ethernetLink(ctx, cfg.Host)
 			return value, err
 		},
-		reboot: func(ctx context.Context, host string) error {
+		rebootForModel: func(ctx context.Context, model, host string) error {
 			cfg, err := loadConfig(ctx)
-			if err != nil || cfg.Host != host {
+			if err != nil || cfg.Host != host || cfg.Model != model {
 				return errConfigUnavailable
 			}
-			return client.Reboot(ctx, cfg)
+			return providers.Reboot(ctx, cfg)
 		},
 	}
 	if err := os.Remove(*socket); err != nil && !errors.Is(err, os.ErrNotExist) {

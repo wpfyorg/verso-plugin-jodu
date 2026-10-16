@@ -20,23 +20,23 @@ var errConfigUnavailable = errors.New("ODU configuration unavailable")
 // Verso's per-session pending edits remain in the shell's Apply workflow.
 func loadODUConfig(ctx context.Context, command, configDir, saveDir string) (oduConfig, error) {
 	get := func(key string) (string, error) {
-		out, err := exec.CommandContext(ctx, command, "-q", "-c", configDir, "-t", saveDir, "-C", saveDir, "get", "jodu5174x.main"+key).Output()
+		out, err := exec.CommandContext(ctx, command, "-q", "-c", configDir, "-t", saveDir, "-C", saveDir, "get", "jodu.main"+key).Output()
 		if err != nil || len(out) > 4096 {
 			return "", errConfigUnavailable
 		}
 		return strings.TrimSuffix(string(out), "\n"), nil
 	}
 	typ, err := get("")
-	if err != nil || typ != "jodu5174x" {
+	if err != nil || typ != "jodu" {
 		return oduConfig{}, errConfigUnavailable
 	}
 	values := map[string]string{}
-	for _, key := range []string{"host", "username", "password", "enabled"} {
+	for _, key := range []string{"model", "host", "username", "password", "enabled"} {
 		value, err := get("." + key)
 		if err != nil {
 			// UCI's CLI returns exit 1 for an empty/unset string option.
 			// Empty passwords are valid configuration until the operator sets one.
-			if key == "password" && ctx.Err() == nil {
+			if (key == "password" || key == "model") && ctx.Err() == nil {
 				values[key] = ""
 				continue
 			}
@@ -44,11 +44,14 @@ func loadODUConfig(ctx context.Context, command, configDir, saveDir string) (odu
 		}
 		values[key] = value
 	}
-	if !validHost(values["host"]) || values["username"] == "" || len(values["username"]) > 64 || len(values["password"]) > 256 ||
+	if values["model"] == "" {
+		values["model"] = model5174x // Existing installs migrate to the historical provider.
+	}
+	if !validModel(values["model"]) || !validHost(values["host"]) || values["username"] == "" || len(values["username"]) > 64 || len(values["password"]) > 256 ||
 		strings.ContainsAny(values["username"], "\r\n") || (values["enabled"] != "0" && values["enabled"] != "1") {
 		return oduConfig{}, errConfigUnavailable
 	}
-	return oduConfig{Host: values["host"], Username: values["username"], Password: values["password"], Enabled: values["enabled"] == "1"}, nil
+	return oduConfig{Model: values["model"], Host: values["host"], Username: values["username"], Password: values["password"], Enabled: values["enabled"] == "1"}, nil
 }
 
 var interfaceName = regexp.MustCompile(`^[A-Za-z0-9_.:@-]{1,64}$`)

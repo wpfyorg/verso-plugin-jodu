@@ -12,9 +12,9 @@ import (
 // Reboot is asynchronous: the shell's plugin gateway has a five-second budget,
 // while the ODU can close its connection while restarting. A one-time token
 // prevents a repeated browser POST from issuing another hardware action.
-func (m *monitor) startReboot(host string) bool {
+func (m *monitor) startReboot(host, model string) bool {
 	m.mu.Lock()
-	if m.rebooting || m.reboot == nil {
+	if m.rebooting || (m.reboot == nil && m.rebootForModel == nil) {
 		m.mu.Unlock()
 		return false
 	}
@@ -23,11 +23,17 @@ func (m *monitor) startReboot(host string) bool {
 	m.value, m.updated, m.checked, m.err = reading{}, time.Time{}, time.Now(), "ODU reboot request pending."
 	m.rebootMessage, m.rebootLevel = "ODU reboot request pending. Reload this page to check the outcome.", "info"
 	reboot := m.reboot
+	rebootForModel := m.rebootForModel
 	m.mu.Unlock()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		err := reboot(ctx, host)
+		var err error
+		if rebootForModel != nil {
+			err = rebootForModel(ctx, model, host)
+		} else {
+			err = reboot(ctx, host)
+		}
 		message, level := "ODU acknowledged the reboot request. Internet access may pause while it restarts.", "success"
 		if errors.Is(err, errRebootUnconfirmed) {
 			message, level = "Reboot request sent, but the ODU disconnected before confirming it. Check its state before trying again.", "warning"
@@ -56,7 +62,7 @@ func (m *monitor) rebootView(host string) map[string]any {
 	if active {
 		return envelope("Reboot 5G ODU", map[string]any{"type": "stack", "children": []any{
 			map[string]any{"type": "callout", "variant": "info", "title": "ODU reboot", "body": message},
-			map[string]any{"type": "link", "label": "Check reboot status", "href": "/plugins/jodu5174x/reboot"},
+			map[string]any{"type": "link", "label": "Check reboot status", "href": "/plugins/jodu/reboot"},
 		}})
 	}
 	page := rebootPage(m.rebootToken(host))
@@ -67,6 +73,9 @@ func (m *monitor) rebootView(host string) map[string]any {
 }
 
 func (m *monitor) rebootRequest(r *http.Request, current map[string]string) (map[string]any, int) {
+	if !supportsReboot(current["model"]) {
+		return envelope("Reboot 5G ODU", warn("Reboot unavailable", "This ODU model does not support reboot from Verso.")), http.StatusOK
+	}
 	if r.Method == http.MethodGet {
 		return m.rebootView(current["host"]), http.StatusOK
 	}
@@ -75,7 +84,7 @@ func (m *monitor) rebootRequest(r *http.Request, current map[string]string) (map
 		page["notice"] = map[string]any{"level": "warning", "text": "Confirm the ODU reboot using a fresh confirmation page."}
 		return page, http.StatusUnprocessableEntity
 	}
-	started := m.startReboot(current["host"])
+	started := m.startReboot(current["host"], current["model"])
 	page := m.rebootView(current["host"])
 	if !started {
 		page["notice"] = map[string]any{"level": "warning", "text": "A reboot is already pending or the reboot service is unavailable."}
@@ -131,6 +140,6 @@ func rebootPage(token string) map[string]any {
 	} else {
 		children = append(children, warn("Confirmation unavailable", "Reload this page later to request another confirmation."))
 	}
-	children = append(children, map[string]any{"type": "link", "label": "Back to ODU", "href": "/plugins/jodu5174x/"})
+	children = append(children, map[string]any{"type": "link", "label": "Back to ODU", "href": "/plugins/jodu/"})
 	return envelope("Reboot 5G ODU", map[string]any{"type": "stack", "children": children})
 }
