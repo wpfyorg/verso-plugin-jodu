@@ -1,7 +1,7 @@
 #!/bin/sh
 # One-time setup on an OpenWrt router using APK v3.
 set -eu
-url='https://wpfyorg.github.io/verso-plugin-jodu5174x'
+url='https://wpfyorg.github.io/verso-plugin-jodu'
 key='/etc/apk/keys/verso-plugin-jodu5174x.pem'
 list='/etc/apk/repositories.d/verso-plugin-jodu5174x.list'
 

@@ -51,15 +51,15 @@ To build the signed APK, run `scripts/build-apk.sh VERSION SIGNING_KEY` inside A
 
 ## Install
 
-The signed [v0.2.1 release](https://github.com/wpfyorg/verso-plugin-jodu/releases/tag/v0.2.1) contains the native ODU backend and sidebar integration. The existing feed key and index remain hosted under the repository's existing GitHub Pages address:
+The signed [v0.2.1 release](https://github.com/wpfyorg/verso-plugin-jodu/releases/tag/v0.2.1) contains the native ODU backend and sidebar integration. The feed key and index are hosted under the renamed repository's GitHub Pages address:
 
-- Public signing key: <https://wpfyorg.github.io/verso-plugin-jodu5174x/verso-plugin-jodu5174x.pem>
-- APK repository: <https://wpfyorg.github.io/verso-plugin-jodu5174x/aarch64_generic/packages.adb>
+- Public signing key: <https://wpfyorg.github.io/verso-plugin-jodu/verso-plugin-jodu5174x.pem>
+- APK repository: <https://wpfyorg.github.io/verso-plugin-jodu/aarch64_generic/packages.adb>
 
 Configure the feed and install or upgrade the package with:
 
 ```sh
-uclient-fetch -O /tmp/jodu-feed.sh https://wpfyorg.github.io/verso-plugin-jodu5174x/setup-feed.sh
+uclient-fetch -O /tmp/jodu-feed.sh https://wpfyorg.github.io/verso-plugin-jodu/setup-feed.sh
 sh /tmp/jodu-feed.sh
 apk update
 ```
