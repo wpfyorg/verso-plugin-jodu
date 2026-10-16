@@ -1,3 +1,3 @@
-module local/verso-jodu5174x
+module local/verso-plugin-jodu
 
 go 1.22
